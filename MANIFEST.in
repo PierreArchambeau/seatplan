@@ -1,0 +1,2 @@
+recursive-include pretix_simpleseatingplan/templates *
+recursive-include pretix_simpleseatingplan/static *

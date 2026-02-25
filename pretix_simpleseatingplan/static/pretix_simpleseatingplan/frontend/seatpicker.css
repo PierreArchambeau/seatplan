@@ -1,0 +1,20 @@
+/* seatpicker.css */
+.my-seatmap-wrapper { margin-top: 10px; }
+.my-seatmap { margin-top: 8px; }
+.my-seatmap .seat-viewport {
+  width: 100%;
+  max-width: 760px;
+  padding: 8px;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+.my-seatmap svg { width: 100%; height: auto; display: block; }
+.my-seatmap .legend { margin-top: 6px; color: #2c3e50; font-size: .95rem; }
+
+input.seat-active { outline: 2px solid #665cf6; outline-offset: 2px; }
+
+/* états sièges */
+[id^="seat-"].sold   { opacity: .25; cursor: not-allowed; }
+[id^="seat-"].held   { opacity: .60; cursor: not-allowed; }
+[id^="seat-"].selected { stroke: #765cf6; stroke-width: 2; fill: #FF0000;}

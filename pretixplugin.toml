@@ -1,0 +1,6 @@
+[pretix]
+plugin="pretix_simpleseatingplan"
+
+[plugin]
+name="pretix_simpleseatingplan"
+module="pretix_simpleseatingplan"

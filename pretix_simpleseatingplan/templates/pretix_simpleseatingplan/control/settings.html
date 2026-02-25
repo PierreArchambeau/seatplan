@@ -1,0 +1,13 @@
+{% extends 'pretixcontrol/event/base.html' %}
+{% load i18n %}{% load bootstrap3 %}
+{% block content %}
+  <h1>{% trans 'Simple seating plan (SVG/JSON)' %}</h1>
+  <p>{% trans 'Imported seats' %}: <strong>{{ seat_count }}</strong></p>
+  <div class='alert alert-info'><strong>Import:</strong> SVG (ids seat-…) or JSON from <code>seats.pretix.eu</code>.</div>
+  <div class='alert alert-warning'><strong>Price zones:</strong> Map seating categories to variation IDs (one per line).</div>
+  <form method='post' enctype='multipart/form-data' class='form-horizontal'>
+    {% csrf_token %}{% bootstrap_form form layout='horizontal' %}
+    <div class='form-group submit-group'><div class='col-md-9 col-md-offset-3'><button type='submit' class='btn btn-primary'>{% trans 'Save' %}</button></div></div>
+  </form>
+  {% if cfg.svg %}<hr><h3>{% trans 'SVG preview' %}</h3><div class='well' style='max-height:60vh; overflow:auto;'>{{ cfg.svg|safe }}</div>{% endif %}
+{% endblock %}
