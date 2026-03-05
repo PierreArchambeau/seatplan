@@ -9,6 +9,66 @@
 (function () {
   'use strict';
 
+  // Liste des "shape" SVG usuelles à colorer
+  const SHAPES = ['path','circle','ellipse','rect','polygon','polyline','line','text','g','use'];
+
+  /**
+   * Applique un fill/ stroke direct aux éléments graphiques ciblés.
+   * - Si le style inline existe -> el.style.fill / el.style.stroke
+   * - Sinon -> attributs de présentation 'fill' / 'stroke'
+   */
+  function applyDirectColor(el, { fill = null, stroke = null } = {}, { includeSelf = true } = {}) {
+    const targets = [];
+    if (includeSelf && SHAPES.includes(el.tagName?.toLowerCase())) targets.push(el);
+    // Descendants graphiques
+    targets.push(...el.querySelectorAll(SHAPES.join(',')));
+
+    targets.forEach(node => {
+      const style = node.getAttribute('style') || '';
+      // Optionnel : nettoyer les directives fill/stroke précédentes dans l'attribut style
+      // (utile si le style inline précédent restait en conflit)
+      if (style) {
+        let newStyle = style
+          .replace(/(^|;)\s*fill\s*:\s*[^;]+/gi, '')
+          .replace(/(^|;)\s*stroke\s*:\s*[^;]+/gi, '');
+        newStyle = newStyle.replace(/;;+/g, ';').replace(/^;|;$/g, '');
+        if (newStyle !== style) node.setAttribute('style', newStyle);
+      }
+
+      // Appliquer fill/stroke
+      if (fill != null) {
+        if (node.style) node.style.fill = fill;        // prioritaire si style inline
+        node.setAttribute('fill', fill);               // attribut de présentation
+      }
+      if (stroke != null) {
+        if (node.style) node.style.stroke = stroke;
+        node.setAttribute('stroke', stroke);
+      }
+    });
+  }
+
+  /**
+   * Met à jour l'apparence d'un siège selon les états sold/held
+   * Couleurs modifiables selon ton design.
+   */
+  function setSeatVisualState(el, { isSold, isHeld }, palette = {
+    sold:   { fill: '#bbbbbb', stroke: '#bbbbbb' },
+    held:   { fill: '#f2b705', stroke: '#f2b705' },
+    free:   { fill: '#17c8d1', stroke: '#0f5f96' }, // exemple: couleur "libre"
+  }) {
+    let colors;
+    if (isSold) colors = palette.sold;
+    else if (isHeld) colors = palette.held;
+    else colors = palette.free;
+
+    applyDirectColor(el, colors, { includeSelf: true });
+
+    // Optionnel : bloquer l'interaction quand indisponible
+    el.style.pointerEvents = (isSold || isHeld) ? 'none' : '';
+    // Optionnel : opacité
+    el.style.opacity = isSold ? '0.55' : (isHeld ? '0.75' : '');
+  }
+
   // ========= Logs & garde-fous =========
   const logI = (...a) => console.log('[seatpicker]', ...a);
   const logW = (...a) => console.warn('[seatpicker]', ...a);
@@ -139,6 +199,7 @@
       throw new Error('No <svg>');
     } catch (e) { logE('Injection SVG (string) échouée', e); return null; }
   }
+
   async function svgFromUrlInto(el, url) {
     try {
       const r = await fetch(url, { credentials: 'same-origin' });
@@ -291,28 +352,56 @@
 
   // ========= Refresh sold/held (partagé) =========
   function scheduleRefresh(svg, cfg) {
+
+    logI('Configuration du refresh des sièges sold/held', cfg);
+
     if (!cfg.status_url) return;
+
+    logI('Refresh des sièges sold/held activé (status_url:', cfg.status_url, ')');
     const prefix = cfg.prefix || '';
 
     const refresh = async () => {
       try {
+        logI('Refresh des sièges sold/held en cours...');
         const st = await getJSON(cfg.status_url);
         const sold = new Set(st.sold || []);
+        logI('Sièges sold:', sold);
         const held = new Set(st.held || []);
+        logI('Sièges held:', held);
         const nodes = prefix
           ? svg.querySelectorAll(`[id^='${prefix}']`)
           : svg.querySelectorAll('[id], [data-seat-id]');
+        
         nodes.forEach((el) => {
-          let id = el.getAttribute('data-seat-id');
+          // let id = el.getAttribute('data-seat-id');
+          let id = el.getAttribute('id');
+          //logI(id)
           if (!id) {
             const raw = el.getAttribute('id') || '';
             id = prefix ? (raw.startsWith(prefix) ? raw.substring(prefix.length) : null) : raw || null;
           }
+          //logI(id)
           if (!id) return;
+          
+          // remove prefix
+          id = id.startsWith(prefix) ? id.substring(prefix.length) : id;
+          //logI(id)
           const isSold = sold.has(id);
           const isHeld = held.has(id) && !isSold;
-          el.classList.toggle('sold', isSold);
-          el.classList.toggle('held', isHeld);
+
+          if (isSold || isHeld) logI(`Mise à jour du siège ${id}: sold=${isSold}, held=${isHeld}`);
+          if (isSold) logI('Siège sold détecté:', id, el);
+          if (isHeld) logI('Siège held détecté:', id, el);               
+          // el.classList.toggle('sold', isSold);
+          // el.classList.toggle('held', isHeld);
+
+          // 4) attributs (toujours mis à jour)
+          // el.setAttribute('sold', String(isSold)); // "true"/"false"
+          // el.setAttribute('held', String(isHeld));
+
+          // Appliquer directement les couleurs dans le SVG
+          setSeatVisualState(el, { isSold, isHeld });
+
         });
       } catch (_) { /* silencieux */ }
     };

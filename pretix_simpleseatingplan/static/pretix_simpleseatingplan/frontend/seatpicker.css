@@ -18,3 +18,26 @@ input.seat-active { outline: 2px solid #665cf6; outline-offset: 2px; }
 [id^="seat-"].sold   { opacity: .25; cursor: not-allowed; }
 [id^="seat-"].held   { opacity: .60; cursor: not-allowed; }
 [id^="seat-"].selected { stroke: #765cf6; stroke-width: 2; fill: #FF0000;}
+
+
+.my-seatmap svg .sold *,
+.my-seatmap svg .sold {
+  fill: #bbb !important;
+  stroke: #bbb !important;
+  cursor: not-allowed !important;
+  opacity: 0.55 !important;
+}
+
+.my-seatmap svg .held *,
+.my-seatmap svg .held {
+  fill: #f2b705 !important;
+  stroke: #f2b705 !important;
+  cursor: wait !important;
+  opacity: 0.75 !important;
+}
+
+/* Optionnel : bloquer l’interaction */
+.my-seatmap svg .sold,
+.my-seatmap svg .held {
+  pointer-events: none;
+}

@@ -76,7 +76,7 @@ def _svg_from_seats_editor(layout, prefix):
                 if not seat_cat and (layout.get('categories') or []):
                     seat_cat = (layout.get('categories')[0].get('name') or '').strip()
                 out.append(f'  <g id="{esc(seat_id)}" data-seat-id="{esc(uuid)}" data-seat-label="{esc(seat_label)}" data-seat-category="{esc(seat_cat)}">\n')
-                out.append(f'    <circle class="seat-dot" cx="{x:.2f}" cy="{y:.2f}" r="{seat.get("radius", 12)}" fill="{"#00FF1E"}"/>\n')
+                out.append(f'    <circle class="seat-dot" cx="{x:.2f}" cy="{y:.2f}" r="{seat.get("radius", 12)}" fill="{fill}"/>\n')
                 if sn:
                     out.append(f'    <text x="{x:.2f}" y="{y+3:.2f}" text-anchor="middle" font-size="10" fill="#0f172a">{esc(sn)}</text>\n')
                 out.append('  </g>\n')
