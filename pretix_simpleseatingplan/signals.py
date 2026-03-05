@@ -29,9 +29,9 @@ def inject_presale_head(sender, request=None, **kwargs):
         cfg = SeatingConfig.objects.get(event=event)
     except SeatingConfig.DoesNotExist:
         return ''
-    if not cfg.svg or not cfg.question_guid_id or not cfg.question_label_id:
+    if not cfg.svg or not cfg.question_label_id:
         return ''
-    css = static('pretix_simpleseatingplan/seatpicker.css')
+    css = static('pretix_simpleseatingplan/frontend/seatpicker.css')
     from pretix.multidomain.urlreverse import eventreverse
     cfg_js = eventreverse(event, 'plugins:pretix_simpleseatingplan:config_js')
     return mark_safe(f'<link rel="stylesheet" href="{css}"><script src="{cfg_js}" defer></script>')
@@ -90,14 +90,57 @@ def on_validate_order(sender, positions, **kwargs):
         return
     _purge_expired(event)
     catmap = _parse_category_map(cfg.category_variation_map)
+
+    # Collect all positions needing seats and try to match them
+    seat_positions = []
     for p in positions:
-        if getattr(p,'item_id',None) != cfg.item_id:
+        if getattr(p, 'item_id', None) != cfg.item_id:
             continue
-        hold = SeatHold.objects.filter(event=event, cart_position_id=p.id).first()
-        if not hold:
+        seat_positions.append(p)
+
+    if not seat_positions:
+        return
+
+    # Get all active holds for this event
+    all_holds = list(SeatHold.objects.filter(event=event))
+    used_hold_ids = set()
+
+    for p in seat_positions:
+        seat_guid = None
+
+        # 1) Hold by exact cart_position_id
+        for h in all_holds:
+            if h.cart_position_id == p.id and h.id not in used_hold_ids:
+                seat_guid = h.seat_guid
+                used_hold_ids.add(h.id)
+                break
+
+        # 2) Seat label answer -> find seat_guid by label
+        if not seat_guid and cfg.question_label_id:
+            try:
+                ans = p.answers.filter(question_id=cfg.question_label_id).first()
+                if ans and ans.answer and ans.answer.strip():
+                    seat = Seat.objects.filter(event=event, label=ans.answer.strip()).first()
+                    if seat and not SeatAssignment.objects.filter(event=event, seat_guid=seat.seat_guid).exists():
+                        seat_guid = seat.seat_guid
+            except Exception:
+                pass
+
+        # 3) Fallback: any unmatched hold for this event (greedy matching)
+        if not seat_guid:
+            for h in all_holds:
+                if h.id not in used_hold_ids:
+                    if Seat.objects.filter(event=event, seat_guid=h.seat_guid).exists() \
+                       and not SeatAssignment.objects.filter(event=event, seat_guid=h.seat_guid).exists():
+                        seat_guid = h.seat_guid
+                        used_hold_ids.add(h.id)
+                        break
+
+        if not seat_guid:
             raise OrderError(_('One or more tickets have no selected seat.'))
-        if catmap and getattr(p,'variation_id',None):
-            seat = Seat.objects.filter(event=event, seat_guid=hold.seat_guid).first()
+
+        if catmap and getattr(p, 'variation_id', None):
+            seat = Seat.objects.filter(event=event, seat_guid=seat_guid).first()
             if seat and seat.category and seat.category in catmap:
                 expected = catmap[seat.category]
                 if int(p.variation_id) != int(expected):
@@ -110,17 +153,26 @@ def on_order_placed(sender, order, **kwargs):
         cfg = SeatingConfig.objects.get(event=event)
     except SeatingConfig.DoesNotExist:
         return
-    if not cfg.item_id or not cfg.question_guid_id:
+    if not cfg.item_id:
         return
     _purge_expired(event)
     for op in order.positions.all():
         if op.item_id != cfg.item_id:
             continue
         seat_guid = None
-        for ans in op.answers.all():
-            if ans.question_id == cfg.question_guid_id:
-                seat_guid = ans.answer
-                break
+        # 1) Seat label answer -> find seat_guid by label
+        if cfg.question_label_id:
+            for ans in op.answers.all():
+                if ans.question_id == cfg.question_label_id and ans.answer:
+                    seat = Seat.objects.filter(event=event, label=ans.answer.strip()).first()
+                    if seat:
+                        seat_guid = seat.seat_guid
+                    break
+        # 2) Fallback: find from SeatHold by cart_position_id
+        if not seat_guid:
+            hold = SeatHold.objects.filter(event=event, cart_position_id=op.id).first()
+            if hold:
+                seat_guid = hold.seat_guid
         if not seat_guid:
             continue
         SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})

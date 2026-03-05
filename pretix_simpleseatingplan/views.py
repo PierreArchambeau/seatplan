@@ -169,14 +169,19 @@ def hold(request, organizer, event, **kwargs):
     _purge_expired(ev)
     seat_guid = request.POST.get('seat_guid')
     try:
-        cartpos_id = int(request.POST.get('cartpos_id'))
+        cartpos_id = int(request.POST.get('cartpos_id', 0) or 0)
     except (TypeError, ValueError):
-        return JsonResponse({'ok':False,'error':'bad_cartpos'}, status=400)
+        cartpos_id = 0
     if not Seat.objects.filter(event=ev, seat_guid=seat_guid).exists():
         return JsonResponse({'ok':False,'error':'unknown_seat'}, status=400)
     if SeatAssignment.objects.filter(event=ev, seat_guid=seat_guid).exists():
         return JsonResponse({'ok':False,'error':'sold'}, status=409)
-    SeatHold.objects.filter(event=ev, cart_position_id=cartpos_id).delete()
+    # Remove existing hold for this same seat (re-selection by anyone)
+    SeatHold.objects.filter(event=ev, seat_guid=seat_guid).delete()
+    # NOTE: we no longer delete by cart_position_id because form indices
+    # are NOT unique across browser sessions, causing cross-session
+    # hold deletion.  Old holds are released explicitly by the JS
+    # via the release endpoint when the user changes their seat.
     expires = timezone.now() + timezone.timedelta(minutes=SeatingConfig.objects.get(event=ev).hold_minutes)
     try:
         with transaction.atomic():
@@ -188,11 +193,10 @@ def hold(request, organizer, event, **kwargs):
 @require_POST
 def release(request, organizer, event, **kwargs):
     ev = _get_event(organizer, event)
-    try:
-        cartpos_id = int(request.POST.get('cartpos_id'))
-    except (TypeError, ValueError):
-        return JsonResponse({'ok':False,'error':'bad_cartpos'}, status=400)
-    SeatHold.objects.filter(event=ev, cart_position_id=cartpos_id).delete()
+    seat_guid = request.POST.get('seat_guid', '').strip()
+    if not seat_guid:
+        return JsonResponse({'ok':False,'error':'missing_seat_guid'}, status=400)
+    SeatHold.objects.filter(event=ev, seat_guid=seat_guid).delete()
     return JsonResponse({'ok':True})
 
 def config_js(request, organizer, event, **kwargs):
@@ -201,7 +205,7 @@ def config_js(request, organizer, event, **kwargs):
         cfg = SeatingConfig.objects.get(event=ev)
     except SeatingConfig.DoesNotExist:
         return HttpResponse('// No config', content_type='application/javascript')
-    if not cfg.svg or not cfg.question_guid_id or not cfg.question_label_id:
+    if not cfg.svg or not cfg.question_label_id:
         return HttpResponse('// Incomplete config', content_type='application/javascript')
     from pretix.multidomain.urlreverse import eventreverse
     data = {
@@ -210,7 +214,6 @@ def config_js(request, organizer, event, **kwargs):
         'status_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:status'),
         'hold_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:hold'),
         'release_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:release'),
-        'question_guid_id': cfg.question_guid_id,
         'question_label_id': cfg.question_label_id,
     }
     js_url = static('pretix_simpleseatingplan/seatpicker.js')

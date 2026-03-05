@@ -1,24 +1,120 @@
 /* seatpicker.css */
-.my-seatmap-wrapper { margin-top: 10px; }
-.my-seatmap { margin-top: 8px; }
+
+/* --- Wrapper: placed BEFORE seat inputs --- */
+.my-seatmap-wrapper {
+  margin-bottom: 18px;
+}
+.my-seatmap {
+  margin-top: 0;
+}
+
+/* --- Viewport: zoomable/pannable container --- */
 .my-seatmap .seat-viewport {
+  position: relative;
   width: 100%;
-  max-width: 760px;
-  padding: 8px;
+  max-width: 860px;
+  height: 480px;
+  padding: 0;
   border: 1px solid #d7e3f4;
   border-radius: 8px;
   background: #f8fbff;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
-.my-seatmap svg { width: 100%; height: auto; display: block; }
-.my-seatmap .legend { margin-top: 6px; color: #2c3e50; font-size: .95rem; }
+.my-seatmap .seat-viewport.grabbing {
+  cursor: grabbing;
+}
 
-input.seat-active { outline: 2px solid #665cf6; outline-offset: 2px; }
+/* SVG inside the pan-zoom layer */
+.my-seatmap .seat-pan-layer {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.my-seatmap .seat-pan-layer svg {
+  display: block;
+}
 
-/* états sièges */
+/* --- Zoom controls --- */
+.my-seatmap .seat-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 10;
+}
+.my-seatmap .seat-controls button {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #c4d3e8;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.12);
+  transition: background .15s;
+}
+.my-seatmap .seat-controls button:hover {
+  background: #e8f0fe;
+}
+
+/* --- Color legend bar --- */
+.my-seatmap .seat-color-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  font-size: .85rem;
+  color: #444;
+  flex-wrap: wrap;
+}
+.my-seatmap .seat-color-legend .legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.my-seatmap .seat-color-legend .legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  min-width: 14px;
+  min-height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(0,0,0,.15);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.my-seatmap .seat-color-legend .swatch-free     { background-color: #22c55e; }
+.my-seatmap .seat-color-legend .swatch-selected { background-color: #2563eb; }
+.my-seatmap .seat-color-legend .swatch-held     { background-color: #f2b705; }
+.my-seatmap .seat-color-legend .swatch-sold     { background-color: #ea0d0d; }
+
+/* --- Status legend (messages) --- */
+.my-seatmap .legend {
+  margin-top: 6px;
+  color: #2c3e50;
+  font-size: .95rem;
+}
+
+/* --- Active input highlight --- */
+input.seat-active {
+  outline: 2px solid #665cf6;
+  outline-offset: 2px;
+}
+
+/* --- Seat states (class-based) --- */
 [id^="seat-"].sold   { opacity: .25; cursor: not-allowed; }
 [id^="seat-"].held   { opacity: .60; cursor: not-allowed; }
-[id^="seat-"].selected { stroke: #765cf6; stroke-width: 2; fill: #FF0000;}
-
+[id^="seat-"].selected { stroke: #765cf6; stroke-width: 2; fill: #FF0000; }
 
 .my-seatmap svg .sold *,
 .my-seatmap svg .sold {
@@ -36,7 +132,6 @@ input.seat-active { outline: 2px solid #665cf6; outline-offset: 2px; }
   opacity: 0.75 !important;
 }
 
-/* Optionnel : bloquer l’interaction */
 .my-seatmap svg .sold,
 .my-seatmap svg .held {
   pointer-events: none;
