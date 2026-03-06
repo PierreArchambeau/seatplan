@@ -82,13 +82,11 @@
   }
 
   // ========= Logs & garde-fous =========
-  const logI = (...a) => console.log('[seatpicker]', ...a);
   const logW = (...a) => console.warn('[seatpicker]', ...a);
   const logE = (...a) => console.error('[seatpicker]', ...a);
 
   window.addEventListener('error', e => logE('window.onerror', e.message, e.filename, e.lineno));
   window.addEventListener('unhandledrejection', e => logE('unhandledrejection', e.reason));
-  logI('JS REACHED TOP OF FILE');
 
   // ========= CSRF / fetch =========
   function getCSRFFromMeta() {
@@ -135,7 +133,7 @@
    * Ex: "questions_1234_5" => 1234, "answers-5-1234" => 1234
    */
   function posIdFromName(name) {
-    logI('Tentative d’extraction posId de', name);
+
     if (!name) return null;
     // Pretix standard: questions_{cartpos}_{qid} ou {prefix}_{cartpos}_{qid}
     let m = name.match(/^[a-z]+_(\d+)_(\d+)$/i);
@@ -164,7 +162,6 @@
                 || container.getAttribute('data-id')
                 || container.getAttribute('data-position');
       if (cid && /^\d+$/.test(cid)) {
-        logI('cartpos_id trouvé via data-attr:', cid);
         return parseInt(cid, 10);
       }
     }
@@ -173,13 +170,11 @@
     if (group) {
       const hidden = group.querySelector('input[name*="cartpos"], input[name*="position_id"]');
       if (hidden && hidden.value && /^\d+$/.test(hidden.value)) {
-        logI('cartpos_id trouvé via hidden input:', hidden.value);
         return parseInt(hidden.value, 10);
       }
     }
     // 3) Fallback: extraire du name
     const fromName = posIdFromName(inputEl.name);
-    logI('cartpos_id fallback via name:', fromName);
     return fromName;
   }
 
@@ -234,7 +229,6 @@
     cont.setAttribute('data-seatmap', '');
     wrap.appendChild(cont);
 
-    logI('Conteneur plan unique inséré (avant les champs)');
     return cont;
   }
 
@@ -253,7 +247,6 @@
 
   // ========= SVG helpers =========
   function svgFromStringInto(el, svgText) {
-    logI('Injection SVG depuis string',svgText);
     try {
       el.innerHTML = svgText;
       const svg = el.querySelector('svg');
@@ -309,17 +302,15 @@
 
     const idFromEl = (el) => {
       // const ds = el.getAttribute('data-seat-id');
-      // logI('Tentative d’extraction GUID de', el, '(data-seat-id:', ds, ')');
       // if (ds && ds.trim()) return ds.trim();
       const raw = el.getAttribute('id') || '';
-      logI('Tentative d’extraction seatId de', el, '(id:', raw, ')');
       if (!raw) return null;
       return prefix ? (raw.startsWith(prefix) ? raw.substring(prefix.length) : null) : raw;
     };
 
     const labelFromEl = (el, fallbackId) => {
       const lbl = el.getAttribute('data-seat-label');
-      logI('Tentative d’extraction label de', el, '(data-seat-label:', lbl, ')');
+
       if (lbl && lbl.trim()) return lbl.trim();
       if (labelMap && fallbackId && labelMap[fallbackId]) return labelMap[fallbackId];
       return fallbackId || '';
@@ -336,9 +327,7 @@
       const payload = { seat_guid: seatGuid };
       payload['cartpos_id'] = cartposId ? String(cartposId) : '0';
 
-      logI('Hold request:', cfg.hold_url, payload);
       const res = await postForm(cfg.hold_url, payload);
-      logI('Hold response:', res);
       if (!res.ok) {
         const err = res.json?.error || res.json?.detail || 'unknown';
         // Block only if seat is sold or held by someone else
@@ -367,9 +356,7 @@
   async function tryReleaseHold(cfg, seatGuid) {
     if (!cfg.release_url || !seatGuid) return;
     try {
-      logI('Release request:', cfg.release_url, { seat_guid: seatGuid });
       const res = await postForm(cfg.release_url, { seat_guid: seatGuid });
-      logI('Release response:', res);
     } catch (e) {
       logW('Release network error (non-blocking):', e);
     }
@@ -405,7 +392,6 @@
   }
 
   function bindPlanClicks(svg, cfg) {
-    logI('Binding clics sur le plan', cfg);
     const { idFromEl, labelFromEl } = makeExtractors(cfg);
 
     svg.addEventListener('click', async (e) => {
@@ -424,10 +410,8 @@
       }
 
       const guid = idFromEl(el);
-      logI('Seat clicked, extracted guid:', guid);
       if (!guid) return;
       const label = labelFromEl(el, guid);
-      logI('Extracted label:', label);
 
       // Choisir l'input cible : actif sinon 1er vide
       let target = g.activeInput || firstEmptyInput() || g.inputs[0];
@@ -447,7 +431,6 @@
       }
 
       // Hold new seat on server
-      logI('Tentative de hold cote serveur (si configure)...');
       const ok = await tryHoldIfConfigured(cfg, guid, target);
       if (!ok) return;
 
@@ -459,7 +442,6 @@
       if (prevLabel) g.seatToInput.delete(prevLabel);
 
       // Affecter valeur lisible
-      logI('Affectation du siege ' + label + ' a l\'input', target);
       target.value = label;
       target.dispatchEvent(new Event('change', { bubbles: true }));
       g.seatToInput.set(label, target);
@@ -478,46 +460,31 @@
 
   // ========= Refresh sold/held (partagé) =========
   function scheduleRefresh(svg, cfg) {
-
-    logI('Configuration du refresh des sièges sold/held', cfg);
-
     if (!cfg.status_url) return;
-
-    logI('Refresh des sièges sold/held activé (status_url:', cfg.status_url, ')');
     const prefix = cfg.prefix || '';
 
     const refresh = async () => {
       try {
-        logI('Refresh des sièges sold/held en cours...');
         const st = await getJSON(cfg.status_url);
         const sold = new Set(st.sold || []);
-        logI('Sièges sold:', sold);
         const held = new Set(st.held || []);
-        logI('Sièges held:', held);
         const nodes = prefix
           ? svg.querySelectorAll(`[id^='${prefix}']`)
           : svg.querySelectorAll('[id], [data-seat-id]');
-        
+
         nodes.forEach((el) => {
           // let id = el.getAttribute('data-seat-id');
           let id = el.getAttribute('id');
-          //logI(id)
           if (!id) {
             const raw = el.getAttribute('id') || '';
             id = prefix ? (raw.startsWith(prefix) ? raw.substring(prefix.length) : null) : raw || null;
           }
-          //logI(id)
           if (!id) return;
-          
+
           // remove prefix
           id = id.startsWith(prefix) ? id.substring(prefix.length) : id;
-          //logI(id)
           const isSold = sold.has(id);
           const isHeld = held.has(id) && !isSold;
-
-          if (isSold || isHeld) logI(`Mise à jour du siège ${id}: sold=${isSold}, held=${isHeld}`);
-          if (isSold) logI('Siège sold détecté:', id, el);
-          if (isHeld) logI('Siège held détecté:', id, el);               
           // el.classList.toggle('sold', isSold);
           // el.classList.toggle('held', isHeld);
 
@@ -757,8 +724,6 @@
 
     // 7) Met le premier input en actif par défaut
     setActiveInput(g.inputs.find(i => !i.disabled) || g.inputs[0]);
-
-    logI('Plan unique prêt ✔︎');
   }
 
   // ========= Hooks Pretix / DOM =========
