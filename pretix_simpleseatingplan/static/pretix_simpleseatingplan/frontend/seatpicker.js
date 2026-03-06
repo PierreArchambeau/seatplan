@@ -687,12 +687,7 @@
     // 1) Liste des champs Seat
     g.inputs = findAllSeatInputs();
     if (!g.inputs.length) {
-      // Check if we're on a questions/checkout page at all
-      const hasQuestionsForm = document.querySelector('.questions-form, .questions, [data-questions], form[id*="question"]');
-      if (hasQuestionsForm) {
-        logW('Aucun champ Seat/Siège détecté (question_id:', cfg.question_label_id, ') → on réessaiera.');
-      }
-      return;
+      return;  // silently wait – boot() will be retried via setTimeout & MutationObserver
     }
 
     // 2) Focus = input actif
