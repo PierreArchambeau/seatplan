@@ -216,9 +216,12 @@ def release(request, organizer, event, **kwargs):
 
 def config_js(request, organizer, event, **kwargs):
     import logging
+<<<<<<< HEAD
     # Verify user has a valid session (checkout context)
     if not (hasattr(request, 'session') and request.session.session_key) and not request.user.is_authenticated:
         return HttpResponse('// Unauthorized', content_type='application/javascript', status=403)
+=======
+>>>>>>> 241f4cc (fallback)
     ev = _get_event(organizer, event)
     try:
         cfg = SeatingConfig.objects.get(event=ev)
