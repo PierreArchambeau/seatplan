@@ -10,7 +10,6 @@ from pretix.base.signals import validate_cart, validate_order, order_placed, ord
 from pretix.control.signals import nav_event_settings
 from pretix.presale.signals import html_head
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
-from pretix.presale.signals import html_head  # ⬅️ presale, pas base
 
 # Try to import order_position_meta_display if available
 try:
@@ -236,18 +235,7 @@ def on_order_placed(sender, order, **kwargs):
                     seat_label = seat.label
         if not seat_guid:
             continue
-        # Write seat label to question answer (for display on tickets)
-        if cfg.question_label_id and seat_label:
-            from pretix.base.models import Question, OrderAnswer
-            try:
-                q = Question.objects.get(event=event, id=cfg.question_label_id)
-                OrderAnswer.objects.update_or_create(
-                    position=op, question=q,
-                    defaults={'answer': seat_label}
-                )
-            except (Question.DoesNotExist, Exception):
-                pass
-        # Also store seat info in position meta for custom display
+        # Store seat info in position meta for custom display
         if seat_label:
             op.meta_info = op.meta_info or {}
             op.meta_info['seat_number'] = seat_label
@@ -270,19 +258,3 @@ def on_periodic(sender, **kwargs):
     from pretix.base.models import Event
     for ev in Event.objects.all().iterator():
         _purge_expired(ev)
-
-
-
-@receiver(html_head, dispatch_uid="simpleseatingplan_html_head")
-
-def add_assets_to_presale(sender, **kwargs):
-    # 1) chemins statiques vers les assets packagés par le plugin
-    css_href = static('pretix_simpleseatingplan/frontend/seatpicker.css')
-    js_src   = static('pretix_simpleseatingplan/frontend/seatpicker.js')
-
-
-    # 3) retourner des BALISES complètes, dans le bon ordre
-    return (
-        f'<link rel="stylesheet" href="{css_href}">\n'
-        f'<script src="{js_src}" defer></script>\n'
-    )
