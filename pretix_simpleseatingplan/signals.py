@@ -12,6 +12,13 @@ from pretix.presale.signals import html_head
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
 from pretix.presale.signals import html_head  # ⬅️ presale, pas base
 
+# Try to import order_position_meta_display if available
+try:
+    from pretix.base.signals import order_position_meta_display
+    HAS_META_DISPLAY = True
+except ImportError:
+    HAS_META_DISPLAY = False
+
 @receiver(nav_event_settings, dispatch_uid='simpleseating_nav_event_settings')
 def nav_settings(sender, request, **kwargs):
     if not request.user.has_event_permission(request.organizer, request.event, 'can_change_settings'):
@@ -35,6 +42,47 @@ def inject_presale_head(sender, request=None, **kwargs):
     from pretix.multidomain.urlreverse import eventreverse
     cfg_js = eventreverse(event, 'plugins:pretix_simpleseatingplan:config_js')
     return mark_safe(f'<link rel="stylesheet" href="{css}"><script src="{cfg_js}" defer></script>')
+
+# Add order position meta display handler if available
+if HAS_META_DISPLAY:
+    @receiver(order_position_meta_display, dispatch_uid='simpleseating_order_position_meta_display')
+    def order_position_meta_display_handler(sender, position, **kwargs):
+        """Display seat number on tickets."""
+        event = sender
+        try:
+            cfg = SeatingConfig.objects.get(event=event)
+        except SeatingConfig.DoesNotExist:
+            return
+
+        if position.item_id != cfg.item_id:
+            return
+
+        # Get seat number from answer or meta_info
+        seat_label = None
+
+        # 1) From question answer (if exists)
+        if cfg.question_label_id:
+            ans = position.answers.filter(question_id=cfg.question_label_id).first()
+            if ans and ans.answer:
+                seat_label = ans.answer.strip()
+
+        # 2) Fallback: from meta_info
+        if not seat_label and hasattr(position, 'meta_info') and position.meta_info:
+            seat_label = position.meta_info.get('seat_number')
+
+        # 3) Fallback: from SeatAssignment -> Seat
+        if not seat_label:
+            assignment = SeatAssignment.objects.filter(event=event, order_position_id=position.id).first()
+            if assignment:
+                seat = Seat.objects.filter(event=event, seat_guid=assignment.seat_guid).first()
+                if seat:
+                    seat_label = seat.label
+
+        if seat_label:
+            return {
+                'name': _('Seat'),
+                'value': seat_label
+            }
 
 from django.utils import timezone
 
@@ -160,6 +208,7 @@ def on_order_placed(sender, order, **kwargs):
         if op.item_id != cfg.item_id:
             continue
         seat_guid = None
+        seat_label = None
         # 1) Seat label answer -> find seat_guid by label
         if cfg.question_label_id:
             for ans in op.answers.all():
@@ -167,14 +216,34 @@ def on_order_placed(sender, order, **kwargs):
                     seat = Seat.objects.filter(event=event, label=ans.answer.strip()).first()
                     if seat:
                         seat_guid = seat.seat_guid
+                        seat_label = seat.label
                     break
         # 2) Fallback: find from SeatHold by cart_position_id
         if not seat_guid:
             hold = SeatHold.objects.filter(event=event, cart_position_id=op.id).first()
             if hold:
-                seat_guid = hold.seat_guid
+                seat = Seat.objects.filter(event=event, seat_guid=hold.seat_guid).first()
+                if seat:
+                    seat_guid = seat.seat_guid
+                    seat_label = seat.label
         if not seat_guid:
             continue
+        # Write seat label to question answer (for display on tickets)
+        if cfg.question_label_id and seat_label:
+            from pretix.base.models import Question, OrderAnswer
+            try:
+                q = Question.objects.get(event=event, id=cfg.question_label_id)
+                OrderAnswer.objects.update_or_create(
+                    position=op, question=q,
+                    defaults={'answer': seat_label}
+                )
+            except (Question.DoesNotExist, Exception):
+                pass
+        # Also store seat info in position meta for custom display
+        if seat_label:
+            op.meta_info = op.meta_info or {}
+            op.meta_info['seat_number'] = seat_label
+            op.save(update_fields=['meta_info'])
         SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})
     SeatHold.objects.filter(event=event, seat_guid__in=SeatAssignment.objects.filter(event=event).values_list('seat_guid', flat=True)).delete()
 
@@ -209,5 +278,3 @@ def add_assets_to_presale(sender, **kwargs):
         f'<link rel="stylesheet" href="{css_href}">\n'
         f'<script src="{js_src}" defer></script>\n'
     )
-
-
