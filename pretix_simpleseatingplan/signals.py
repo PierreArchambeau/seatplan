@@ -47,6 +47,7 @@ if HAS_META_DISPLAY:
     @receiver(order_position_meta_display, dispatch_uid='simpleseating_order_position_meta_display')
     def order_position_meta_display_handler(sender, position, **kwargs):
         """Display seat number on tickets."""
+        import json as json_module
         event = sender
         try:
             cfg = SeatingConfig.objects.get(event=event)
@@ -65,9 +66,14 @@ if HAS_META_DISPLAY:
             if ans and ans.answer:
                 seat_label = ans.answer.strip()
 
-        # 2) Fallback: from meta_info
-        if not seat_label and hasattr(position, 'meta_info') and isinstance(position.meta_info, dict):
-            seat_label = position.meta_info.get('seat_number')
+        # 2) Fallback: from meta_info (parse JSON string)
+        if not seat_label and position.meta_info:
+            try:
+                meta_dict = json_module.loads(position.meta_info) if isinstance(position.meta_info, str) else position.meta_info
+                if isinstance(meta_dict, dict):
+                    seat_label = meta_dict.get('seat_number')
+            except (ValueError, TypeError):
+                pass
 
         # 3) Fallback: from SeatAssignment -> Seat
         if not seat_label:
@@ -203,6 +209,7 @@ def on_validate_order(sender, positions, **kwargs):
 
 @receiver(order_placed, dispatch_uid='simpleseating_order_placed')
 def on_order_placed(sender, order, **kwargs):
+    import json as json_module
     event = sender
     try:
         cfg = SeatingConfig.objects.get(event=event)
@@ -235,11 +242,16 @@ def on_order_placed(sender, order, **kwargs):
                     seat_label = seat.label
         if not seat_guid:
             continue
-        # Store seat info in position meta for custom display
+        # Store seat info in position meta for custom display (as JSON string)
         if seat_label:
-            if not isinstance(op.meta_info, dict):
-                op.meta_info = {}
-            op.meta_info['seat_number'] = seat_label
+            try:
+                meta_dict = json_module.loads(op.meta_info) if isinstance(op.meta_info, str) else (op.meta_info or {})
+                if not isinstance(meta_dict, dict):
+                    meta_dict = {}
+            except (ValueError, TypeError):
+                meta_dict = {}
+            meta_dict['seat_number'] = seat_label
+            op.meta_info = json_module.dumps(meta_dict)
             op.save(update_fields=['meta_info'])
         SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})
     SeatHold.objects.filter(event=event, seat_guid__in=SeatAssignment.objects.filter(event=event).values_list('seat_guid', flat=True)).delete()
