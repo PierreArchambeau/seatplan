@@ -129,7 +129,9 @@ def on_validate_cart(sender, positions, **kwargs):
 
 @receiver(validate_order, dispatch_uid='simpleseating_validate_order')
 def on_validate_order(sender, positions, **kwargs):
+    import logging
     event = sender
+    logger = logging.getLogger(__name__)
     try:
         cfg = SeatingConfig.objects.get(event=event)
     except SeatingConfig.DoesNotExist:
@@ -158,7 +160,7 @@ def on_validate_order(sender, positions, **kwargs):
 
         # 1) Hold by exact cart_position_id
         for h in all_holds:
-            if h.cart_position_id == p.id and h.id not in used_hold_ids:
+            if h.cart_position_id == p.id and h.id not in used_hold_ids and h.cart_position_id != 0:
                 seat_guid = h.seat_guid
                 used_hold_ids.add(h.id)
                 break
@@ -171,8 +173,8 @@ def on_validate_order(sender, positions, **kwargs):
                     seat = Seat.objects.filter(event=event, label=ans.answer.strip()).first()
                     if seat and not SeatAssignment.objects.filter(event=event, seat_guid=seat.seat_guid).exists():
                         seat_guid = seat.seat_guid
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Error matching seat by label for position {p.id}: {e}")
 
         # 3) Fallback: any unmatched hold for this event (greedy matching)
         if not seat_guid:
@@ -185,14 +187,20 @@ def on_validate_order(sender, positions, **kwargs):
                         break
 
         if not seat_guid:
+            logger.warning(f"No seat found for position {p.id} in event {event.slug}")
             raise OrderError(_('One or more tickets have no selected seat.'))
 
         if catmap and getattr(p, 'variation_id', None):
-            seat = Seat.objects.filter(event=event, seat_guid=seat_guid).first()
-            if seat and seat.category and seat.category in catmap:
-                expected = catmap[seat.category]
-                if int(p.variation_id) != int(expected):
-                    raise OrderError(_('Seat category does not match ticket type.'))
+            try:
+                seat = Seat.objects.filter(event=event, seat_guid=seat_guid).first()
+                if seat and seat.category and seat.category in catmap:
+                    expected = catmap[seat.category]
+                    if int(p.variation_id) != int(expected):
+                        raise OrderError(_('Seat category does not match ticket type.'))
+            except OrderError:
+                raise
+            except Exception as e:
+                logger.error(f"Error validating seat category for position {p.id}: {e}")
 
 @receiver(order_placed, dispatch_uid='simpleseating_order_placed')
 def on_order_placed(sender, order, **kwargs):
