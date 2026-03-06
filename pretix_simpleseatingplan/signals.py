@@ -120,7 +120,7 @@ def on_validate_cart(sender, positions, **kwargs):
         hold = SeatHold.objects.filter(event=event, cart_position_id=p.id).first()
         # if not hold:
         #     raise CartError(_('Please choose a seat for each ticket.'))
-        if catmap and getattr(p,'variation_id',None):
+        if hold and catmap and getattr(p,'variation_id',None):
             seat = Seat.objects.filter(event=event, seat_guid=hold.seat_guid).first()
             if seat and seat.category and seat.category in catmap:
                 expected = catmap[seat.category]

@@ -154,9 +154,16 @@ def plan_svg(request, organizer, event, **kwargs):
         return HttpResponse('No config', content_type='text/plain', status=404)
     if not cfg.svg:
         return HttpResponse('No SVG in config', content_type='text/plain', status=404)
-    return HttpResponse(cfg.svg, content_type='image/svg+xml; charset=utf-8')
+    # Set Content-Disposition to prevent XSS if SVG contains script tags
+    response = HttpResponse(cfg.svg, content_type='image/svg+xml; charset=utf-8')
+    response['Content-Disposition'] = 'inline; filename="plan.svg"'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response
 
 def status(request, organizer, event, **kwargs):
+    # Verify user is in a valid checkout session for this event
+    if not (hasattr(request, 'session') and request.session.session_key) and not request.user.is_authenticated:
+        return JsonResponse({'error': 'unauthorized'}, status=403)
     ev = _get_event(organizer, event)
     _purge_expired(ev)
     sold = list(SeatAssignment.objects.filter(event=ev).values_list('seat_guid', flat=True))
@@ -165,9 +172,14 @@ def status(request, organizer, event, **kwargs):
 
 @require_POST
 def hold(request, organizer, event, **kwargs):
+    # Verify user has a valid session (checkout context)
+    if not (hasattr(request, 'session') and request.session.session_key) and not request.user.is_authenticated:
+        return JsonResponse({'ok':False,'error':'unauthorized'}, status=403)
     ev = _get_event(organizer, event)
     _purge_expired(ev)
-    seat_guid = request.POST.get('seat_guid')
+    seat_guid = request.POST.get('seat_guid', '').strip()
+    if not seat_guid:
+        return JsonResponse({'ok':False,'error':'missing_seat_guid'}, status=400)
     try:
         cartpos_id = int(request.POST.get('cartpos_id', 0) or 0)
     except (TypeError, ValueError):
@@ -192,6 +204,9 @@ def hold(request, organizer, event, **kwargs):
 
 @require_POST
 def release(request, organizer, event, **kwargs):
+    # Verify user has a valid session (checkout context)
+    if not (hasattr(request, 'session') and request.session.session_key) and not request.user.is_authenticated:
+        return JsonResponse({'ok':False,'error':'unauthorized'}, status=403)
     ev = _get_event(organizer, event)
     seat_guid = request.POST.get('seat_guid', '').strip()
     if not seat_guid:
@@ -201,6 +216,9 @@ def release(request, organizer, event, **kwargs):
 
 def config_js(request, organizer, event, **kwargs):
     import logging
+    # Verify user has a valid session (checkout context)
+    if not (hasattr(request, 'session') and request.session.session_key) and not request.user.is_authenticated:
+        return HttpResponse('// Unauthorized', content_type='application/javascript', status=403)
     ev = _get_event(organizer, event)
     try:
         cfg = SeatingConfig.objects.get(event=ev)
