@@ -200,6 +200,7 @@ def release(request, organizer, event, **kwargs):
     return JsonResponse({'ok':True})
 
 def config_js(request, organizer, event, **kwargs):
+    import logging
     ev = _get_event(organizer, event)
     try:
         cfg = SeatingConfig.objects.get(event=ev)
@@ -216,7 +217,16 @@ def config_js(request, organizer, event, **kwargs):
         'release_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:release'),
         'question_label_id': cfg.question_label_id,
     }
-    js_url = static('pretix_simpleseatingplan/frontend/seatpicker.js')
-    payload = 'window.SimpleSeatingPlanCfg = ' + json.dumps(data) + ';' \
-              '(function(){try{var s=document.createElement("script");s.src=' + json.dumps(js_url) + ';s.defer=true;document.head.appendChild(s);}catch(e){console.error("Seatpicker loader error",e);}})();\n'
+    logger = logging.getLogger(__name__)
+    try:
+        js_url = static('pretix_simpleseatingplan/frontend/seatpicker.js')
+    except Exception as e:
+        logger.warning(f"Failed to resolve seatpicker.js static URL: {e}")
+        js_url = None
+    if js_url:
+        payload = 'window.SimpleSeatingPlanCfg = ' + json.dumps(data) + ';' \
+                  '(function(){try{var s=document.createElement("script");s.src=' + json.dumps(js_url) + ';s.defer=true;document.head.appendChild(s);}catch(e){console.error("Seatpicker loader error",e);}})();\n'
+    else:
+        payload = 'window.SimpleSeatingPlanCfg = ' + json.dumps(data) + ';\n' \
+                  'console.warn("Seatpicker.js failed to load from static files. Check collectstatic and STATIC_ROOT configuration.");\n'
     return HttpResponse(payload, content_type='application/javascript')
