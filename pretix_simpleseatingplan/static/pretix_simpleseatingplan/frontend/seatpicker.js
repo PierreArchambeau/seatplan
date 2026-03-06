@@ -182,8 +182,27 @@
     const langs = /(seat|si\u00e8ge|siege|place|platz|asiento)/i;
     const guidExclude = /(guid|identifiant)/i;
     const set = new Set();
+    const cfg = window.SimpleSeatingPlanCfg || {};
 
-    // via <label for="...">
+    // 1) Via la question_label_id si disponible dans la config
+    if (cfg.question_label_id) {
+      const qid = cfg.question_label_id;
+      // Essayer les formats courants Pretix d'input names liés à une question
+      const patterns = [
+        `input[name*="${qid}"]`,
+        `input[name*="question_${qid}"]`,
+        `input[name*="questions_${qid}"]`,
+        `textarea[name*="${qid}"]`,
+        `select[name*="${qid}"]`,
+      ];
+      patterns.forEach(selector => {
+        document.querySelectorAll(selector).forEach(el => {
+          if (el.type !== 'hidden' && el.offsetParent !== null) set.add(el);
+        });
+      });
+    }
+
+    // 2) Via <label for="...">
     document.querySelectorAll('label[for]').forEach(lab => {
       const txt = (lab.textContent || '').trim();
       if (langs.test(txt) && !guidExclude.test(txt)) {
@@ -192,7 +211,7 @@
       }
     });
 
-    // fallback name/id (exclude GUID and hidden inputs)
+    // 3) Fallback: chercher dans name/id (exclude GUID and hidden inputs)
     document.querySelectorAll('input,select,textarea').forEach(el => {
       if (el.type === 'hidden') return;
       const key = (el.name || '') + ' ' + (el.id || '');
@@ -667,7 +686,7 @@
     // 1) Liste des champs Seat
     g.inputs = findAllSeatInputs();
     if (!g.inputs.length) {
-      logW('Aucun champ Seat/Siège détecté → on réessaiera.');
+      logW('Aucun champ Seat/Siège détecté (question_id:', cfg.question_label_id, ') → on réessaiera.');
       return;
     }
 
@@ -740,6 +759,9 @@
   });
   mo.observe(document.documentElement, { childList: true, subtree: true });
 
+  setTimeout(boot, 100);
   setTimeout(boot, 500);
   setTimeout(boot, 1000);
+  setTimeout(boot, 2000);
+  setTimeout(boot, 3000);
 })();
