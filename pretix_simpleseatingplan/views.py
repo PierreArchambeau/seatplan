@@ -216,7 +216,7 @@ def config_js(request, organizer, event, **kwargs):
         'release_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:release'),
         'question_label_id': cfg.question_label_id,
     }
-    js_url = static('pretix_simpleseatingplan/seatpicker.js')
+    js_url = static('pretix_simpleseatingplan/frontend/seatpicker.js')
     payload = 'window.SimpleSeatingPlanCfg = ' + json.dumps(data) + ';' \
               '(function(){try{var s=document.createElement("script");s.src=' + json.dumps(js_url) + ';s.defer=true;document.head.appendChild(s);}catch(e){console.error("Seatpicker loader error",e);}})();\n'
     return HttpResponse(payload, content_type='application/javascript')
