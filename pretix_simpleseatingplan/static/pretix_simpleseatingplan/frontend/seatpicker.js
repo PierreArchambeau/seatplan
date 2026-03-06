@@ -197,7 +197,8 @@
       ];
       patterns.forEach(selector => {
         document.querySelectorAll(selector).forEach(el => {
-          if (el.type !== 'hidden' && el.offsetParent !== null) set.add(el);
+          // Include even if hidden or disabled (might be shown conditionally)
+          if (el.type !== 'hidden') set.add(el);
         });
       });
     }
@@ -686,7 +687,11 @@
     // 1) Liste des champs Seat
     g.inputs = findAllSeatInputs();
     if (!g.inputs.length) {
-      logW('Aucun champ Seat/Siège détecté (question_id:', cfg.question_label_id, ') → on réessaiera.');
+      // Check if we're on a questions/checkout page at all
+      const hasQuestionsForm = document.querySelector('.questions-form, .questions, [data-questions], form[id*="question"]');
+      if (hasQuestionsForm) {
+        logW('Aucun champ Seat/Siège détecté (question_id:', cfg.question_label_id, ') → on réessaiera.');
+      }
       return;
     }
 
