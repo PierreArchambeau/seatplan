@@ -66,7 +66,7 @@ if HAS_META_DISPLAY:
                 seat_label = ans.answer.strip()
 
         # 2) Fallback: from meta_info
-        if not seat_label and hasattr(position, 'meta_info') and position.meta_info:
+        if not seat_label and hasattr(position, 'meta_info') and isinstance(position.meta_info, dict):
             seat_label = position.meta_info.get('seat_number')
 
         # 3) Fallback: from SeatAssignment -> Seat
@@ -237,7 +237,8 @@ def on_order_placed(sender, order, **kwargs):
             continue
         # Store seat info in position meta for custom display
         if seat_label:
-            op.meta_info = op.meta_info or {}
+            if not isinstance(op.meta_info, dict):
+                op.meta_info = {}
             op.meta_info['seat_number'] = seat_label
             op.save(update_fields=['meta_info'])
         SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})
