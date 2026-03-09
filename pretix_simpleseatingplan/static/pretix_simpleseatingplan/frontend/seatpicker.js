@@ -554,7 +554,7 @@
   // ========= Zoom & Pan =========
   function initZoomPan(viewport, panLayer, container) {
     let scale = 1, panX = 0, panY = 0;
-    const MIN_SCALE = 0.5, MAX_SCALE = 5, ZOOM_STEP = 0.15;
+    const MIN_SCALE = 0.5, MAX_SCALE = 5, ZOOM_STEP = 0.06;
     let dragging = false, startX = 0, startY = 0, startPanX = 0, startPanY = 0;
     let dragMoved = false; // track if mouse actually moved (vs. click)
 
@@ -611,46 +611,45 @@
       }
     });
 
-    // Touch: pinch-zoom + pan
+    // Touch: 2 doigts = pan + pinch-zoom, 1 doigt = clic siège uniquement
     let lastTouchDist = 0, lastTouchMid = null;
     viewport.addEventListener('touchstart', (e) => {
       if (e.target.closest('.seat-controls')) return;
-      if (e.touches.length === 1) {
+      if (e.touches.length === 2) {
         dragging = true;
         dragMoved = false;
-        startX = e.touches[0].clientX;
-        startY = e.touches[0].clientY;
+        const t = e.touches;
+        const mx = (t[0].clientX + t[1].clientX) / 2;
+        const my = (t[0].clientY + t[1].clientY) / 2;
+        startX = mx;
+        startY = my;
         startPanX = panX;
         startPanY = panY;
-      } else if (e.touches.length === 2) {
-        dragging = false;
-        const t = e.touches;
         lastTouchDist = Math.hypot(t[1].clientX - t[0].clientX, t[1].clientY - t[0].clientY);
         const rect = viewport.getBoundingClientRect();
-        lastTouchMid = {
-          x: (t[0].clientX + t[1].clientX) / 2 - rect.left,
-          y: (t[0].clientY + t[1].clientY) / 2 - rect.top,
-        };
+        lastTouchMid = { x: mx - rect.left, y: my - rect.top };
       }
     }, { passive: true });
     viewport.addEventListener('touchmove', (e) => {
-      if (e.touches.length === 1 && dragging) {
-        const dx = e.touches[0].clientX - startX;
-        const dy = e.touches[0].clientY - startY;
+      if (e.touches.length === 2) {
+        const t = e.touches;
+        const mx = (t[0].clientX + t[1].clientX) / 2;
+        const my = (t[0].clientY + t[1].clientY) / 2;
+        // Pan
+        const dx = mx - startX;
+        const dy = my - startY;
         if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragMoved = true;
         panX = startPanX + dx;
         panY = startPanY + dy;
-        applyTransform();
-        e.preventDefault();
-      } else if (e.touches.length === 2 && lastTouchDist) {
-        const t = e.touches;
+        // Pinch-zoom
         const dist = Math.hypot(t[1].clientX - t[0].clientX, t[1].clientY - t[0].clientY);
-        const delta = (dist - lastTouchDist) * 0.005;
-        const rect = viewport.getBoundingClientRect();
-        const mx = (t[0].clientX + t[1].clientX) / 2 - rect.left;
-        const my = (t[0].clientY + t[1].clientY) / 2 - rect.top;
-        zoomAt(mx, my, delta);
+        if (lastTouchDist) {
+          const delta = (dist - lastTouchDist) * 0.005;
+          const rect = viewport.getBoundingClientRect();
+          zoomAt(mx - rect.left, my - rect.top, delta);
+        }
         lastTouchDist = dist;
+        applyTransform();
         e.preventDefault();
       }
     }, { passive: false });
