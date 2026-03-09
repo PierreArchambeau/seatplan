@@ -426,7 +426,7 @@
 
       // Verifier si le siege est indisponible (sold/held par un autre)
       if (el.style.pointerEvents === 'none') {
-        setLegend(g.container, 'Ce siege n\'est pas disponible.');
+        setLegend(g.container, 'Ce siège n\'est pas disponible.');
         return;
       }
 
@@ -436,12 +436,12 @@
 
       // Choisir l'input cible : actif sinon 1er vide
       let target = g.activeInput || firstEmptyInput() || g.inputs[0];
-      if (!target) { setLegend(g.container, 'Aucun champ "Seat" trouve.'); return; }
+      if (!target) { setLegend(g.container, 'Aucun champ "Siège" trouvé.'); return; }
 
       // Anti-doublon : si deja pris par un autre input
       const already = g.seatToInput.get(label);
       if (already && already !== target) {
-        setLegend(g.container, 'Le siege ' + label + ' est deja attribue.');
+        setLegend(g.container, 'Le siège ' + label + ' est déjà attribué.');
         return;
       }
 
@@ -471,7 +471,7 @@
       // Visuel : marquer TOUS les sieges selectionnes dans le formulaire
       refreshSelectedVisuals(svg, cfg);
 
-      setLegend(g.container, 'Siege selectionne : ' + label);
+      setLegend(g.container, 'Siège sélectionné : ' + label);
 
       // Passer au champ suivant s'il est vide
       const nxt = nextInput(target);
@@ -711,6 +711,13 @@
 
     // 4) Layout & injection du plan (with zoom/pan viewport)
     g.container.innerHTML = ''
+      + '<div class="seat-instructions">'
+      +   '<strong>Comment choisir vos places\u00a0:</strong>'
+      +   '<ol>'
+      +     '<li>Cliquez sur le plan pour s\u00e9lectionner une place. R\u00e9p\u00e9tez pour chaque participant.</li>'
+      +     '<li>Pour modifier une place, cliquez d\u2019abord sur le champ correspondant ci-dessous, puis s\u00e9lectionnez la nouvelle place sur le plan.</li>'
+      +   '</ol>'
+      + '</div>'
       + '<div class="seat-viewport">'
       +   '<div class="seat-pan-layer"></div>'
       +   '<div class="seat-controls">'
