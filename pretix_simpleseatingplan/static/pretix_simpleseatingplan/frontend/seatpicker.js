@@ -234,11 +234,23 @@
 
     // Place the plan BEFORE the seat fields (standard UX: pick then fill)
     const seats = findAllSeatInputs();
-    const anchor = seats.length ? groupForInput(seats[0]) : (document.querySelector('.product-container') || document.body);
+    let anchor = seats.length ? groupForInput(seats[0]) : (document.querySelector('.product-container') || document.body);
+
+    // Remonter au-dessus d'un éventuel <table> pour ne pas injecter un <div> dans un tableau
+    let node = anchor;
+    while (node && node !== document.body) {
+      const tag = node.tagName && node.tagName.toLowerCase();
+      if (tag === 'table' || tag === 'tbody' || tag === 'thead' || tag === 'tr' || tag === 'td' || tag === 'th') {
+        // Remonter jusqu'à trouver le <table> englobant, puis s'ancrer juste avant
+        const table = node.closest('table');
+        if (table) { anchor = table; break; }
+      }
+      break;
+    }
 
     const wrap = document.createElement('div');
     wrap.className = 'my-seatmap-wrapper';
-    // Insert BEFORE the first seat field group
+    // Insert BEFORE the anchor (first seat field group or table)
     if (anchor.parentElement) {
       anchor.parentElement.insertBefore(wrap, anchor);
     } else {
@@ -686,7 +698,19 @@
 
     // 0) Vérifier que la question seat-label est présente sur cette page
     if (cfg.question_label_id && !isQuestionOnPage(cfg.question_label_id)) {
-      return;  // la question n'est pas sur cette page, pas de plan
+      // Afficher un message d'information si on est sur une page de checkout (présence du formulaire)
+      var form = document.querySelector('form.checkout-form, form.form-horizontal, main form');
+      if (form && !document.getElementById('seat-checkout-notice')) {
+        var notice = document.createElement('div');
+        notice.id = 'seat-checkout-notice';
+        notice.className = 'seat-instructions';
+        notice.innerHTML = '<strong>\ud83d\udcba Plan de salle disponible</strong><br>'
+          + 'Le choix des places se fera \u00e0 une \u00e9tape ultérieure du processus de commande.';
+        // Insérer en haut du formulaire
+        var target = document.getElementById('questions_group') || form;
+        target.insertBefore(notice, target.firstChild);
+      }
+      return;
     }
 
     // 1) Liste des champs Seat
