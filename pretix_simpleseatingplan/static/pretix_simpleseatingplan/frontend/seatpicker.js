@@ -696,10 +696,12 @@
       return;  // silently wait – boot() will be retried via setTimeout & MutationObserver
     }
 
-    // 2) Focus = input actif
+    // 2) Focus = input actif + protection anti-copie Pretix
     g.inputs.forEach(inp => {
       inp.removeEventListener?.('focus', onFocusSeatInput);
       inp.addEventListener('focus', onFocusSeatInput);
+      // Pretix skip les éléments dans .js-do-not-copy-answers lors du "copier les réponses"
+      inp.classList.add('js-do-not-copy-answers');
     });
     function onFocusSeatInput(e) { setActiveInput(e.currentTarget); }
 
