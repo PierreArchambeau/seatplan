@@ -129,25 +129,17 @@
   // ========= Détection des champs Seat =========
   /**
    * Extrait le cart position ID depuis le name d'un champ input.
-   * Pretix utilise typiquement : {prefix}_{cartpos_pk}_{question_pk}
-   * Ex: "questions_1234_5" => 1234, "answers-5-1234" => 1234
+   * Pretix checkout: name="{cartpos_id}-question_{question_id}"
+   * Ex: "42-question_7" => 42
    */
   function posIdFromName(name) {
-
     if (!name) return null;
-    // Pretix standard: questions_{cartpos}_{qid} ou {prefix}_{cartpos}_{qid}
-    let m = name.match(/^[a-z]+_(\d+)_(\d+)$/i);
+    // Pretix standard: {cartpos_id}-question_{qid}
+    const m = name.match(/^(\d+)-question_\d+$/);
     if (m) return parseInt(m[1], 10);
-    // Pretix alternate: {prefix}-{cartpos}-{qid}-answer
-    m = name.match(/^[a-z]+-?(\d+)-(\d+)(?:-|$)/i);
-    if (m) return parseInt(m[1], 10);
-    // answers-QID-POS
-    m = name.match(/^answers-(\d+)-(\d+)(?:-|$)/);
-    if (m) return parseInt(m[2], 10);
-    m = name.match(/(?:^|-)pos(?:ition)?-?(\d+)(?:-|$)/i);
-    if (m) return parseInt(m[1], 10);
+    // Fallback: premier nombre dans le name
     const nums = name.match(/\d+/g);
-    return nums ? parseInt(nums[nums.length - 1], 10) : null;
+    return nums ? parseInt(nums[0], 10) : null;
   }
 
   /**
@@ -185,21 +177,11 @@
   function isQuestionOnPage(qid) {
     if (!qid) return true;
     const q = String(qid);
-    const namePatterns = [
-      new RegExp('^[a-z]+_\\d+_' + q + '$', 'i'),         // questions_{cartpos}_{qid}
-      new RegExp('^[a-z]+-\\d+-' + q + '(?:-|$)', 'i'),   // prefix-{pos}-{qid}[-answer]
-      new RegExp('^answers-' + q + '-\\d+', 'i'),          // answers-{qid}-{pos}
-    ];
+    // Pretix checkout: name="{cartpos_id}-question_{question_id}"
+    const re = new RegExp('^\\d+-question_' + q + '$');
     for (const el of document.querySelectorAll('input, textarea, select')) {
       const name = el.name || '';
-      if (!name) continue;
-      for (const re of namePatterns) {
-        if (re.test(name)) return true;
-      }
-    }
-    // Chercher un hidden input de formset avec value = qid (ex: name="questions-0-question" value="42")
-    for (const h of document.querySelectorAll('input[type="hidden"]')) {
-      if (h.value === q && /question/i.test(h.name || '')) return true;
+      if (name && re.test(name)) return true;
     }
     return false;
   }
@@ -211,21 +193,14 @@
     const cfg = window.SimpleSeatingPlanCfg || {};
 
     // 1) Via la question_label_id si disponible dans la config
+    //    Pretix checkout: name="{cartpos_id}-question_{question_id}"
     if (cfg.question_label_id) {
-      const qid = cfg.question_label_id;
-      const q = String(qid);
-      // Sélecteurs précis basés sur les conventions Pretix
-      const namePatterns = [
-        new RegExp('^[a-z]+_\\d+_' + q + '$', 'i'),
-        new RegExp('^[a-z]+-\\d+-' + q + '(?:-|$)', 'i'),
-        new RegExp('^answers-' + q + '-\\d+', 'i'),
-      ];
+      const q = String(cfg.question_label_id);
+      const re = new RegExp('^\\d+-question_' + q + '$');
       document.querySelectorAll('input, textarea, select').forEach(el => {
         if (el.type === 'hidden') return;
         const name = el.name || '';
-        for (const re of namePatterns) {
-          if (re.test(name)) { set.add(el); break; }
-        }
+        if (re.test(name)) set.add(el);
       });
     }
 
