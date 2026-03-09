@@ -30,12 +30,16 @@ def nav_settings(sender, request, **kwargs):
 
 @receiver(html_head, dispatch_uid='simpleseating_html_head')
 def inject_presale_head(sender, request=None, **kwargs):
+    from pretix.base.models import Question
     event = sender
     try:
         cfg = SeatingConfig.objects.get(event=event)
     except SeatingConfig.DoesNotExist:
         return ''
     if not cfg.svg or not cfg.question_label_id:
+        return ''
+    # Verify the question actually exists in the event
+    if not Question.objects.filter(event=event, pk=cfg.question_label_id).exists():
         return ''
     css = static('pretix_simpleseatingplan/frontend/seatpicker.css')
     from pretix.multidomain.urlreverse import eventreverse

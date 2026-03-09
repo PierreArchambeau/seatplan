@@ -178,6 +178,32 @@
     return fromName;
   }
 
+  /**
+   * Vérifie si la question identifiée par qid est présente sur la page.
+   * Utilise les conventions de nommage Pretix pour détecter précisément.
+   */
+  function isQuestionOnPage(qid) {
+    if (!qid) return true;
+    const q = String(qid);
+    const namePatterns = [
+      new RegExp('^[a-z]+_\\d+_' + q + '$', 'i'),         // questions_{cartpos}_{qid}
+      new RegExp('^[a-z]+-\\d+-' + q + '(?:-|$)', 'i'),   // prefix-{pos}-{qid}[-answer]
+      new RegExp('^answers-' + q + '-\\d+', 'i'),          // answers-{qid}-{pos}
+    ];
+    for (const el of document.querySelectorAll('input, textarea, select')) {
+      const name = el.name || '';
+      if (!name) continue;
+      for (const re of namePatterns) {
+        if (re.test(name)) return true;
+      }
+    }
+    // Chercher un hidden input de formset avec value = qid (ex: name="questions-0-question" value="42")
+    for (const h of document.querySelectorAll('input[type="hidden"]')) {
+      if (h.value === q && /question/i.test(h.name || '')) return true;
+    }
+    return false;
+  }
+
   function findAllSeatInputs() {
     const langs = /(seat|si\u00e8ge|siege|place|platz|asiento)/i;
     const guidExclude = /(guid|identifiant)/i;
@@ -187,19 +213,19 @@
     // 1) Via la question_label_id si disponible dans la config
     if (cfg.question_label_id) {
       const qid = cfg.question_label_id;
-      // Essayer les formats courants Pretix d'input names liés à une question
-      const patterns = [
-        `input[name*="${qid}"]`,
-        `input[name*="question_${qid}"]`,
-        `input[name*="questions_${qid}"]`,
-        `textarea[name*="${qid}"]`,
-        `select[name*="${qid}"]`,
+      const q = String(qid);
+      // Sélecteurs précis basés sur les conventions Pretix
+      const namePatterns = [
+        new RegExp('^[a-z]+_\\d+_' + q + '$', 'i'),
+        new RegExp('^[a-z]+-\\d+-' + q + '(?:-|$)', 'i'),
+        new RegExp('^answers-' + q + '-\\d+', 'i'),
       ];
-      patterns.forEach(selector => {
-        document.querySelectorAll(selector).forEach(el => {
-          // Include even if hidden or disabled (might be shown conditionally)
-          if (el.type !== 'hidden') set.add(el);
-        });
+      document.querySelectorAll('input, textarea, select').forEach(el => {
+        if (el.type === 'hidden') return;
+        const name = el.name || '';
+        for (const re of namePatterns) {
+          if (re.test(name)) { set.add(el); break; }
+        }
       });
     }
 
@@ -682,6 +708,11 @@
     if (!cfg.svg && !cfg.svg_url) {
       logW('Config manquante (cfg.svg | cfg.svg_url).');
       return;
+    }
+
+    // 0) Vérifier que la question seat-label est présente sur cette page
+    if (cfg.question_label_id && !isQuestionOnPage(cfg.question_label_id)) {
+      return;  // la question n'est pas sur cette page, pas de plan
     }
 
     // 1) Liste des champs Seat

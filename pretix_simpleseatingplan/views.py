@@ -226,6 +226,9 @@ def config_js(request, organizer, event, **kwargs):
         return HttpResponse('// No config', content_type='application/javascript')
     if not cfg.svg or not cfg.question_label_id:
         return HttpResponse('// Incomplete config', content_type='application/javascript')
+    from pretix.base.models import Question
+    if not Question.objects.filter(event=ev, pk=cfg.question_label_id).exists():
+        return HttpResponse('// Question not found', content_type='application/javascript')
     from pretix.multidomain.urlreverse import eventreverse
     data = {
         'svg': cfg.svg,

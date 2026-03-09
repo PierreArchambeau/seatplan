@@ -1,5 +1,6 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+migrations/__pycache__/
 *.py[cod]
 *$py.class
 
@@ -128,3 +129,4 @@ dmypy.json
 *.swp
 *.swo
 *~
+pretix_simpleseatingplan/migrations/__pycache__/*
