@@ -751,6 +751,138 @@
 
     // 7) Met le premier input en actif par défaut
     setActiveInput(g.inputs.find(i => !i.disabled) || g.inputs[0]);
+
+    // 8) Validation au submit : doublons + disponibilité
+    bindFormValidation(cfg);
+  }
+
+  // ========= Validation submit =========
+  function bindFormValidation(cfg) {
+    const form = document.querySelector('form:has(#questions_group)');
+    if (!form || form._seatValidationBound) return;
+    form._seatValidationBound = true;
+
+    form.addEventListener('submit', async function (e) {
+      // Recalculer les inputs au moment du submit (le DOM peut avoir changé)
+      const inputs = findAllSeatInputs();
+      if (!inputs.length) return; // pas d'inputs siège, laisser passer
+
+      // 1) Vérifier que chaque champ est rempli
+      const empty = inputs.filter(i => !(i.value || '').trim());
+      if (empty.length) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        clearSeatErrors();
+        empty.forEach(i => showSeatError(i, 'Veuillez sélectionner un siège.'));
+        empty[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return false;
+      }
+
+      // 2) Vérifier l'unicité
+      const seen = new Map();
+      const duplicates = [];
+      for (const inp of inputs) {
+        const val = (inp.value || '').trim();
+        if (seen.has(val)) {
+          duplicates.push(inp);
+          duplicates.push(seen.get(val));
+        } else {
+          seen.set(val, inp);
+        }
+      }
+      if (duplicates.length) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        clearSeatErrors();
+        const unique = [...new Set(duplicates)];
+        unique.forEach(i => showSeatError(i, 'Ce siège est déjà attribué à un autre participant.'));
+        unique[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return false;
+      }
+
+      // 3) Vérifier la disponibilité (sold/held) via le status endpoint
+      if (cfg.status_url) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        clearSeatErrors();
+
+        let st;
+        try {
+          st = await getJSON(cfg.status_url);
+        } catch (_) {
+          // Réseau indisponible : laisser le serveur valider
+          form.submit();
+          return;
+        }
+
+        const sold = new Set(st.sold || []);
+        const held = new Set(st.held || []);
+        const prefix = cfg.prefix || '';
+
+        // Exclure des held les sièges sélectionnés dans le formulaire (nos propres holds)
+        const ownGuids = new Set();
+        for (const inp of inputs) {
+          const label = (inp.value || '').trim();
+          if (label) {
+            const g = guidFromLabel(label, prefix);
+            if (g) ownGuids.add(g);
+          }
+        }
+
+        const unavailable = [];
+
+        for (const inp of inputs) {
+          const label = (inp.value || '').trim();
+          const guid = guidFromLabel(label, prefix);
+          if (guid && (sold.has(guid) || (held.has(guid) && !ownGuids.has(guid)))) {
+            unavailable.push(inp);
+          }
+        }
+
+        if (unavailable.length) {
+          unavailable.forEach(i => showSeatError(i, 'Ce siège n\'est plus disponible. Veuillez en choisir un autre.'));
+          unavailable[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          return;
+        }
+
+        // Tout est OK, soumettre le formulaire
+        form.submit();
+      }
+    });
+  }
+
+  /**
+   * Retrouve le seat_guid à partir du label affiché, en cherchant dans le SVG.
+   */
+  function guidFromLabel(label, prefix) {
+    if (!g.svg || !label) return null;
+    const sel = prefix ? `[id^='${prefix}']` : '[id]';
+    for (const node of g.svg.querySelectorAll(sel)) {
+      const nodeLabel = (node.getAttribute('data-seat-label') || '').trim();
+      if (nodeLabel === label) {
+        const rawId = node.getAttribute('id') || '';
+        return prefix && rawId.startsWith(prefix) ? rawId.substring(prefix.length) : rawId;
+      }
+    }
+    return null;
+  }
+
+  function showSeatError(input, msg) {
+    input.classList.add('seat-error');
+    const group = groupForInput(input);
+    let errEl = group.querySelector('.seat-error-msg');
+    if (!errEl) {
+      errEl = document.createElement('div');
+      errEl.className = 'seat-error-msg';
+      errEl.style.cssText = 'color:#dc2626;font-size:0.85em;margin-top:4px;';
+      input.insertAdjacentElement('afterend', errEl);
+    }
+    errEl.textContent = msg;
+  }
+
+  function clearSeatErrors() {
+    document.querySelectorAll('.seat-error').forEach(el => el.classList.remove('seat-error'));
+    document.querySelectorAll('.seat-error-msg').forEach(el => el.remove());
   }
 
   // ========= Hooks Pretix / DOM =========
