@@ -24,21 +24,9 @@
     targets.push(...el.querySelectorAll(SHAPES.join(',')));
 
     targets.forEach(node => {
-      // Clean previous fill/stroke via DOM API (CSP-safe, no setAttribute('style'))
-      if (node.style) {
-        node.style.removeProperty('fill');
-        node.style.removeProperty('stroke');
-      }
-
-      // Apply fill/stroke via presentation attributes + DOM style API
-      if (fill != null) {
-        node.setAttribute('fill', fill);
-        if (node.style) node.style.fill = fill;
-      }
-      if (stroke != null) {
-        node.setAttribute('stroke', stroke);
-        if (node.style) node.style.stroke = stroke;
-      }
+      // Use SVG presentation attributes only — no inline styles (CSP-safe)
+      if (fill != null) node.setAttribute('fill', fill);
+      if (stroke != null) node.setAttribute('stroke', stroke);
     });
   }
 
@@ -63,21 +51,21 @@
 
     if (isSold) {
       applyDirectColor(el, palette.sold, { includeSelf: true });
-      el.style.pointerEvents = 'none';
-      el.style.opacity = '0.55';
+      el.setAttribute('pointer-events', 'none');
+      el.setAttribute('opacity', '0.55');
     } else if (isHeld) {
       applyDirectColor(el, palette.held, { includeSelf: true });
-      el.style.pointerEvents = 'none';
-      el.style.opacity = '0.75';
+      el.setAttribute('pointer-events', 'none');
+      el.setAttribute('opacity', '0.75');
     } else if (isSelected) {
       applyDirectColor(el, palette.selected, { includeSelf: true });
-      el.style.pointerEvents = '';
-      el.style.opacity = '';
+      el.removeAttribute('pointer-events');
+      el.removeAttribute('opacity');
     } else {
       // Free seat: use the free palette color
       applyDirectColor(el, palette.free, { includeSelf: true });
-      el.style.pointerEvents = '';
-      el.style.opacity = '';
+      el.removeAttribute('pointer-events');
+      el.removeAttribute('opacity');
     }
   }
 
@@ -743,8 +731,11 @@
       + '<div class="seat-instructions">'
       +   '<strong>Comment choisir vos places\u00a0:</strong>'
       +   '<ol>'
-      +     '<li>Cliquez sur le plan pour s\u00e9lectionner une place. R\u00e9p\u00e9tez pour chaque participant.</li>'
+      +     '<li>(optionnel) Remplir le nom du participant. Ceci est propos\u00e9 pour votre facilit\u00e9 uniquement.</li>'
+      +     '<li>Cliquez ensuite sur le plan pour s\u00e9lectionner une place. R\u00e9p\u00e9tez pour chaque participant.</li>'
+      +     '<li>Les places sélectionn\u00e9es vont appara\u00eetre dans le champs "Si\u00e8ge" de chaque billet.</li>'
       +     '<li>Pour modifier une place, cliquez d\u2019abord sur le champ correspondant ci-dessous, puis s\u00e9lectionnez la nouvelle place sur le plan.</li>'
+      +     '<li>Vous pouvez \u00e9galement encoder manuellement les places. Le plan se mettra \u00e0 jour automatiquement.</li>'
       +   '</ol>'
       + '</div>'
       + '<div class="seat-viewport">'

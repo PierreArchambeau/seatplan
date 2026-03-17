@@ -145,6 +145,13 @@ input.seat-error {
   outline-offset: 1px;
 }
 
+/* --- SVG text labels (replaces the removed inline <style> in generated SVG) --- */
+.my-seatmap .seat-pan-layer .row-label {
+  fill: #222;
+  font-size: 12px;
+  font-family: sans-serif;
+}
+
 /* --- Seat states (class-based) --- */
 [id^="seat-"].sold   { opacity: .25; cursor: not-allowed; }
 [id^="seat-"].held   { opacity: .60; cursor: not-allowed; }

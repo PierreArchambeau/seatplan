@@ -46,10 +46,6 @@ def _svg_from_seats_editor(layout, prefix):
     out.append('<?xml version="1.0" encoding="UTF-8"?>\n')
     out.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">\n')
     out.append('  <rect x="0" y="0" width="100%" height="100%" fill="#f8f9fa"/>\n')
-    out.append('  <defs><style><![CDATA[\n')
-    out.append('    .seat-dot { stroke: #0f172a; stroke-width: 1; }\n')
-    out.append('    .row-label { fill: #222; font: 12px sans-serif; }\n')
-    out.append('  ]]></style></defs>\n')
     for z in (layout.get('zones') or []):
         zx = float((z.get('position') or {}).get('x', 0))
         zy = float((z.get('position') or {}).get('y', 0))
@@ -76,7 +72,7 @@ def _svg_from_seats_editor(layout, prefix):
                 if not seat_cat and (layout.get('categories') or []):
                     seat_cat = (layout.get('categories')[0].get('name') or '').strip()
                 out.append(f'  <g id="{esc(seat_id)}" data-seat-id="{esc(uuid)}" data-seat-label="{esc(seat_label)}" data-seat-category="{esc(seat_cat)}">\n')
-                out.append(f'    <circle class="seat-dot" cx="{x:.2f}" cy="{y:.2f}" r="{seat.get("radius", 12)}" fill="{fill}"/>\n')
+                out.append(f'    <circle class="seat-dot" cx="{x:.2f}" cy="{y:.2f}" r="{seat.get(\"radius\", 12)}" fill="{fill}" stroke="#0f172a" stroke-width="1"/>\n')
                 if sn:
                     out.append(f'    <text x="{x:.2f}" y="{y+3:.2f}" text-anchor="middle" font-size="10" fill="#0f172a">{esc(sn)}</text>\n')
                 out.append('  </g>\n')
