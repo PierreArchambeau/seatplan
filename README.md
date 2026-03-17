@@ -132,8 +132,52 @@ For more help, see [DOCUMENTATION.md](DOCUMENTATION.md#troubleshooting).
 
 ## 📄 License
 
-This plugin is provided under the license specified in [MANIFEST.in](MANIFEST.in).
+This plugin is provided under the Apache License 2.0. See [LICENSE](LICENSE).
+
+## 🙌 Contributing
+
+Contributions are welcome and encouraged.
+
+- Open an issue to report bugs or discuss ideas
+- Submit a pull request for fixes, tests, or improvements
+- Help improve documentation and examples
+
+Even small contributions are valuable and appreciated.
+
+### How to Contribute
+
+1. Fork the repository and create a feature branch.
+2. Set up a local Pretix environment and install the plugin in editable mode:
+
+```bash
+pip install -e .
+python -m pretix migrate
+python -m pretix collectstatic --noinput
+```
+
+3. Make focused changes with clear commit messages.
+4. Validate your changes locally:
+
+```bash
+python -m pretix check
+```
+
+5. Update documentation when behavior or configuration changes.
+6. Open a pull request with:
+- A short problem statement
+- A summary of the solution
+- Manual test steps (and screenshots if UI changed)
+
+### Good First Contributions
+
+- Improve error handling and validation messages
+- Add tests around hold/release and cart validation flows
+- Improve SVG import compatibility and docs examples
 
 ## 🤝 Support
+
+This plugin is developed on a volunteer basis and in contributors' available time.
+Response times are not guaranteed.
+Community contributions are welcome and help improve support and delivery speed for everyone.
 
 For bugs or feature requests, please open an issue.

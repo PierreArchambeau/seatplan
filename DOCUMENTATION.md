@@ -295,4 +295,4 @@ The plugin implements multiple security layers to prevent common attacks:
 
 ## License and Support
 
-Refer to the MANIFEST.in and README.md files for license details.
+This plugin is licensed under Apache License 2.0. See LICENSE for full terms.
