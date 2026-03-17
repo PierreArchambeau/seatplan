@@ -209,9 +209,28 @@ def release(request, organizer, event, **kwargs):
         return JsonResponse({'ok':False,'error':'unauthorized'}, status=403)
     ev = _get_event(organizer, event)
     seat_guid = request.POST.get('seat_guid', '').strip()
+    cartpos_id_str = request.POST.get('cartpos_id', '').strip()
+
     if not seat_guid:
         return JsonResponse({'ok':False,'error':'missing_seat_guid'}, status=400)
-    SeatHold.objects.filter(event=ev, seat_guid=seat_guid).delete()
+    if not cartpos_id_str:
+        return JsonResponse({'ok':False,'error':'missing_cartpos_id'}, status=400)
+
+    try:
+        cartpos_id = int(cartpos_id_str)
+    except (TypeError, ValueError):
+        return JsonResponse({'ok':False,'error':'invalid_cartpos_id'}, status=400)
+
+    # Only delete the hold belonging to this specific cart position (owned by this user)
+    deleted, _ = SeatHold.objects.filter(
+        event=ev,
+        seat_guid=seat_guid,
+        cart_position_id=cartpos_id
+    ).delete()
+
+    if deleted == 0:
+        return JsonResponse({'ok':False,'error':'hold_not_found'}, status=404)
+
     return JsonResponse({'ok':True})
 
 def config_js(request, organizer, event, **kwargs):
