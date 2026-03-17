@@ -245,8 +245,11 @@ def config_js(request, organizer, event, **kwargs):
     if not Question.objects.filter(event=ev, pk=cfg.question_label_id).exists():
         return HttpResponse('// Question not found', content_type='application/javascript')
     from pretix.multidomain.urlreverse import eventreverse
+    # Strip any inline <style> blocks from the SVG to comply with CSP (style-src 'self').
+    # This handles SVGs imported before the fix as well as SVGs uploaded directly.
+    clean_svg = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', cfg.svg, flags=re.IGNORECASE)
     data = {
-        'svg': cfg.svg,
+        'svg': clean_svg,
         'prefix': cfg.seat_id_prefix,
         'status_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:status'),
         'hold_url': eventreverse(ev,'plugins:pretix_simpleseatingplan:hold'),

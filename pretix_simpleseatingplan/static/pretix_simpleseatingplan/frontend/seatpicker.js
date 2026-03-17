@@ -267,9 +267,18 @@
   }
 
   // ========= SVG helpers =========
+  /**
+   * Remove <style> blocks from SVG text before injection to comply with
+   * Content Security Policy (style-src 'self'): inline <style> in injected
+   * SVG is blocked by CSP. Seat styles are handled via external seatpicker.css.
+   */
+  function stripSvgStyles(svgText) {
+    return svgText.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+  }
+
   function svgFromStringInto(el, svgText) {
     try {
-      el.innerHTML = svgText;
+      el.innerHTML = stripSvgStyles(svgText);
       const svg = el.querySelector('svg');
       if (svg) return svg;
       throw new Error('No <svg>');
@@ -281,7 +290,7 @@
       const r = await fetch(url, { credentials: 'same-origin' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const txt = await r.text();
-      el.innerHTML = txt;
+      el.innerHTML = stripSvgStyles(txt);
       const svg = el.querySelector('svg');
       if (svg) return svg;
       throw new Error('No <svg> root');
