@@ -181,3 +181,8 @@ Response times are not guaranteed.
 Community contributions are welcome and help improve support and delivery speed for everyone.
 
 For bugs or feature requests, please open an issue.
+
+## 🔗 Useful Links
+
+- Pretix website: https://pretix.eu
+- Pretix community repository: https://github.com/pretix/pretix
