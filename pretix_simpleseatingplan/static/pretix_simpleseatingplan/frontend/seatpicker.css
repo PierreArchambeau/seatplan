@@ -119,9 +119,17 @@
 
 /* --- Status legend (messages) --- */
 .my-seatmap .legend {
-  margin-top: 6px;
+  margin-top: 8px;
   color: #2c3e50;
   font-size: .95rem;
+  min-height: 0;
+}
+.my-seatmap .legend:not(:empty) {
+  background: #eef4fc;
+  border: 1px solid #c5d9f0;
+  border-radius: 6px;
+  padding: 10px 16px;
+  color: #1e3a5f;
 }
 
 /* --- Active input highlight --- */

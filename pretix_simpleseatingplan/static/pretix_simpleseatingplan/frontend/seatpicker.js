@@ -384,12 +384,16 @@
 
   /**
    * Release the hold for a seat_guid via the release endpoint.
+   * cartposId must match the one used when the hold was created.
    * Fire-and-forget: does not block the UI.
    */
-  async function tryReleaseHold(cfg, seatGuid) {
+  async function tryReleaseHold(cfg, seatGuid, cartposId) {
     if (!cfg.release_url || !seatGuid) return;
     try {
-      const res = await postForm(cfg.release_url, { seat_guid: seatGuid });
+      await postForm(cfg.release_url, {
+        seat_guid: seatGuid,
+        cartpos_id: String(cartposId ?? 0),
+      });
     } catch (e) {
       logW('Release network error (non-blocking):', e);
     }
@@ -460,7 +464,8 @@
       // Release old hold for this input (if user is changing seat)
       const prevGuid = g.inputToGuid.get(target);
       if (prevGuid && prevGuid !== guid) {
-        tryReleaseHold(cfg, prevGuid); // fire-and-forget
+        const prevCartposId = findCartPosId(target) || 0;
+        tryReleaseHold(cfg, prevGuid, prevCartposId); // fire-and-forget
       }
 
       // Hold new seat on server
@@ -804,6 +809,7 @@
         e.stopImmediatePropagation();
         clearSeatErrors();
         empty.forEach(i => showSeatError(i, 'Veuillez sélectionner un siège.'));
+        setLegend(g.container, 'Veuillez sélectionner un siège pour chaque participant avant de continuer.');
         empty[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
         return false;
       }
