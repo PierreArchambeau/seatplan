@@ -175,24 +175,34 @@
   }
 
   function findAllSeatInputs() {
-    const langs = /(seat|si\u00e8ge|siege|place|platz|asiento)/i;
-    const guidExclude = /(guid|identifiant)/i;
-    const set = new Set();
     const cfg = window.SimpleSeatingPlanCfg || {};
 
-    // 1) Via la question_label_id si disponible dans la config
-    //    Pretix checkout: name="{cartpos_id}-question_{question_id}"
+    // 1) Via la question_label_id : c'est LA question "Si\u00e8ge" g\u00e9r\u00e9e par ce
+    //    plugin, donc la source de v\u00e9rit\u00e9. Pretix checkout:
+    //    name="{cartpos_id}-question_{question_id}"
+    //    On ne m\u00e9lange JAMAIS ce r\u00e9sultat avec la d\u00e9tection heuristique
+    //    ci-dessous : sinon un autre champ (ex. "Nom" dont le libell\u00e9
+    //    contient le mot "place", du style "Nom pour cette place") peut se
+    //    faire passer pour un champ Si\u00e8ge et r\u00e9cup\u00e9rer le clic \u00e0 la place
+    //    du vrai champ.
     if (cfg.question_label_id) {
       const q = String(cfg.question_label_id);
       const re = new RegExp('^\\d+-question_' + q + '$');
+      const set = new Set();
       document.querySelectorAll('input, textarea, select').forEach(el => {
         if (el.type === 'hidden') return;
         const name = el.name || '';
         if (re.test(name)) set.add(el);
       });
+      if (set.size) return Array.from(set);
     }
 
-    // 2) Via <label for="...">
+    // 2) Fallback heuristique, utilis\u00e9 seulement si (1) n'a rien trouv\u00e9
+    //    (ex: config incompl\u00e8te ou structure de page inhabituelle).
+    const langs = /(seat|si\u00e8ge|siege|place|platz|asiento)/i;
+    const guidExclude = /(guid|identifiant)/i;
+    const set = new Set();
+
     document.querySelectorAll('label[for]').forEach(lab => {
       const txt = (lab.textContent || '').trim();
       if (langs.test(txt) && !guidExclude.test(txt)) {
@@ -201,7 +211,6 @@
       }
     });
 
-    // 3) Fallback: chercher dans name/id (exclude GUID and hidden inputs)
     document.querySelectorAll('input,select,textarea').forEach(el => {
       if (el.type === 'hidden') return;
       const key = (el.name || '') + ' ' + (el.id || '');

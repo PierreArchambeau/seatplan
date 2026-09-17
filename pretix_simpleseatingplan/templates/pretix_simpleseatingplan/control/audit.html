@@ -1,0 +1,71 @@
+{% extends 'pretixcontrol/event/base.html' %}
+{% load i18n %}
+{% block content %}
+  <h1>{% trans 'Seat audit' %}</h1>
+  <p>{% trans 'Finds paid/pending orders whose seat was never recorded as sold on the plan (typically because the customer typed the seat number by hand in a slightly different format), and flags seats claimed by more than one order.' %}</p>
+
+  {% if result %}
+    <h3>{% trans 'Conflicts' %} <span class='label label-danger'>{{ result.conflicts|length }}</span></h3>
+    {% if result.conflicts %}
+      <p class='text-danger'>{% trans 'The same seat is claimed by more than one order. These are never resolved automatically — please review and contact the affected customers.' %}</p>
+      <table class='table table-bordered'>
+        <thead><tr><th>{% trans 'Seat' %}</th><th>{% trans 'Claimed by' %}</th></tr></thead>
+        <tbody>
+        {% for c in result.conflicts %}
+          <tr>
+            <td>{{ c.seat_guid }}</td>
+            <td>
+              {% if c.already_sold_position_id %}<div>{% trans 'already sold, position' %} #{{ c.already_sold_position_id }}</div>{% endif %}
+              {% for order, pos, raw_label in c.claims %}
+                <div>{{ order.code }} &mdash; {% trans 'position' %} #{{ pos.id }} ({% trans 'typed' %} &quot;{{ raw_label }}&quot;)</div>
+              {% endfor %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class='text-muted'>{% trans 'None.' %}</p>
+    {% endif %}
+
+    <h3>{% trans 'Missing assignments' %} <span class='label label-warning'>{{ result.resolved|length }}</span></h3>
+    {% if result.resolved %}
+      <table class='table table-bordered'>
+        <thead><tr><th>{% trans 'Order' %}</th><th>{% trans 'Position' %}</th><th>{% trans 'Typed label' %}</th><th>{% trans 'Matched seat' %}</th><th>{% trans 'Status' %}</th></tr></thead>
+        <tbody>
+        {% for r in result.resolved %}
+          <tr>
+            <td>{{ r.order.code }}</td>
+            <td>#{{ r.position.id }}</td>
+            <td>{{ r.raw_label }}</td>
+            <td>{{ r.seat_guid }}</td>
+            <td>{% if r.fixed %}<span class='label label-success'>{% trans 'fixed' %}</span>{% else %}<span class='label label-default'>{% trans 'pending' %}</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <form method='post'>
+        {% csrf_token %}
+        <input type='hidden' name='action' value='fix'>
+        <button type='submit' class='btn btn-primary'>{% trans 'Fix unambiguous missing assignments' %}</button>
+      </form>
+    {% else %}
+      <p class='text-muted'>{% trans 'None.' %}</p>
+    {% endif %}
+
+    <h3>{% trans 'Unmatched labels' %} <span class='label label-default'>{{ result.unmatched|length }}</span></h3>
+    {% if result.unmatched %}
+      <p class='text-muted'>{% trans "These typed seat numbers don't match any known seat at all, even with tolerant matching. They need manual review." %}</p>
+      <table class='table table-bordered'>
+        <thead><tr><th>{% trans 'Order' %}</th><th>{% trans 'Position' %}</th><th>{% trans 'Typed label' %}</th></tr></thead>
+        <tbody>
+        {% for order, pos, raw_label in result.unmatched %}
+          <tr><td>{{ order.code }}</td><td>#{{ pos.id }}</td><td>{{ raw_label }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class='text-muted'>{% trans 'None.' %}</p>
+    {% endif %}
+  {% endif %}
+{% endblock %}
