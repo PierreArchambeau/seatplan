@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from django.urls import reverse
 from pretix.base.services.cart import CartError
 from pretix.base.services.orders import OrderError
-from pretix.base.signals import validate_cart, validate_order, order_placed, order_canceled, order_expired, periodic_task
+from pretix.base.signals import validate_cart, validate_order, order_placed, order_canceled, order_expired, order_modified, periodic_task
 from pretix.control.signals import nav_event_settings
 from pretix.presale.signals import html_head
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
@@ -294,6 +294,90 @@ def on_order_placed(sender, order, **kwargs):
             op.save(update_fields=['meta_info'])
         SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})
     SeatHold.objects.filter(event=event, seat_guid__in=SeatAssignment.objects.filter(event=event).values_list('seat_guid', flat=True)).delete()
+
+@receiver(order_modified, dispatch_uid='simpleseating_order_modified')
+def on_order_modified(sender, order, **kwargs):
+    """
+    Pretix sends this signal whenever user-entered information on an
+    already-placed order is edited -- including question answers changed
+    by staff in the control panel ("Modify" on the order detail page), by
+    the customer through self-service order changes, or via the API. Since
+    the "Seat" answer can be edited this way, the SeatAssignment table (and
+    therefore what shows as sold on the plan) needs to be kept in sync with
+    whatever the answer says now.
+
+    This can only react after the fact -- the edit is already saved by the
+    time this fires -- so ambiguous cases (edited to a seat already held by
+    another position, or to a label matching no seat at all) are left
+    untouched and logged rather than guessed at; run simpleseating_audit to
+    review those.
+    """
+    import logging
+    event = sender
+    logger = logging.getLogger(__name__)
+    try:
+        cfg = SeatingConfig.objects.get(event=event)
+    except SeatingConfig.DoesNotExist:
+        return
+    if not cfg.item_id or not cfg.question_label_id:
+        return
+
+    label_index = build_label_index(event)
+    assignments = {a.order_position_id: a for a in SeatAssignment.objects.filter(event=event)}
+    assigned_guids = {a.seat_guid: a for a in assignments.values()}
+
+    for op in order.positions.all():
+        if op.item_id != cfg.item_id:
+            continue
+
+        ans = op.answers.filter(question_id=cfg.question_label_id).first()
+        raw_label = ans.answer.strip() if ans and ans.answer else ''
+        new_seat = match_seat_by_label(label_index, raw_label) if raw_label else None
+
+        current = assignments.get(op.id)
+        current_guid = current.seat_guid if current else None
+        new_guid = new_seat.seat_guid if new_seat else None
+
+        if new_guid == current_guid:
+            continue  # this position's seat answer didn't actually change
+
+        if new_guid is None:
+            logger.warning(
+                f"order_modified: position {op.id} (order {order.code}) seat answer "
+                f"'{raw_label}' no longer matches a known seat; keeping previous "
+                f"assignment {current_guid!r} in place. Run simpleseating_audit to review."
+            )
+            continue
+
+        holder = assigned_guids.get(new_guid)
+        if holder and holder.order_position_id != op.id:
+            logger.warning(
+                f"order_modified: position {op.id} (order {order.code}) was edited to seat "
+                f"'{raw_label}' ({new_guid}), but that seat is already assigned to position "
+                f"{holder.order_position_id}. Leaving both assignments untouched; needs manual review."
+            )
+            continue
+
+        if current:
+            current.delete()
+            assigned_guids.pop(current_guid, None)
+        new_assignment, _ = SeatAssignment.objects.get_or_create(
+            event=event, seat_guid=new_guid, defaults={'order_position_id': op.id}
+        )
+        assignments[op.id] = new_assignment
+        assigned_guids[new_guid] = new_assignment
+        logger.info(f"order_modified: position {op.id} (order {order.code}) seat re-synced to '{raw_label}' ({new_guid})")
+
+        import json as json_module
+        try:
+            meta_dict = json_module.loads(op.meta_info) if isinstance(op.meta_info, str) else (op.meta_info or {})
+            if not isinstance(meta_dict, dict):
+                meta_dict = {}
+        except (ValueError, TypeError):
+            meta_dict = {}
+        meta_dict['seat_number'] = new_seat.label
+        op.meta_info = json_module.dumps(meta_dict)
+        op.save(update_fields=['meta_info'])
 
 @receiver(order_canceled, dispatch_uid='simpleseating_order_canceled')
 def on_order_canceled(sender, order, **kwargs):

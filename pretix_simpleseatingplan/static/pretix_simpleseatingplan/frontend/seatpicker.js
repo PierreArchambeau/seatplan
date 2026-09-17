@@ -13,6 +13,20 @@
   const SHAPES = ['path','circle','ellipse','rect','polygon','polyline','line','text','g','use'];
 
   /**
+   * Normalise un libellé de siège pour comparaison tolérante : casse,
+   * espaces/tirets/underscores/points et zéros de tête n'ont pas d'importance
+   * ("a1", "A 1", "A-01" normalisent tous vers "A1", comme le siège "A-1").
+   * Doit rester en phase avec seat_matching.normalize_seat_label() côté serveur
+   * (pretix_simpleseatingplan/seat_matching.py), sinon le plan et la validation
+   * finale de la commande peuvent se contredire.
+   */
+  function normalizeSeatLabel(label) {
+    if (!label) return '';
+    const stripped = String(label).trim().toUpperCase().replace(/[\s\-_./]+/g, '');
+    return stripped.replace(/(?<!\d)0+(\d)/g, '$1');
+  }
+
+  /**
    * Applique un fill/ stroke direct aux éléments graphiques ciblés.
    * - Si le style inline existe -> el.style.fill / el.style.stroke
    * - Sinon -> attributs de présentation 'fill' / 'stroke'
@@ -416,19 +430,20 @@
     const prefix = cfg.prefix || '';
     const sel = prefix ? `[id^='${prefix}'], [data-seat-id]` : '[id], [data-seat-id]';
 
-    // Collecter les labels de tous les champs seat remplis
+    // Collecter les labels normalisés de tous les champs seat remplis, pour
+    // reconnaître une saisie manuelle même mal formatée (ex: "a1" == "A-1").
     const selectedLabels = new Set();
     for (const inp of g.inputs) {
-      const label = (inp.value || '').trim();
-      if (label) selectedLabels.add(label);
+      const norm = normalizeSeatLabel(inp.value || '');
+      if (norm) selectedLabels.add(norm);
     }
 
     if (selectedLabels.size === 0) return;
 
     // Appliquer le style a chaque siege dont le label correspond
     svg.querySelectorAll(sel).forEach(node => {
-      const seatLabel = (node.getAttribute('data-seat-label') || '').trim();
-      if (seatLabel && selectedLabels.has(seatLabel)) {
+      const norm = normalizeSeatLabel(node.getAttribute('data-seat-label') || '');
+      if (norm && selectedLabels.has(norm)) {
         setSeatVisualState(node, { isSold: false, isHeld: false, isSelected: true });
       }
     });
@@ -460,8 +475,9 @@
       let target = g.activeInput || firstEmptyInput() || g.inputs[0];
       if (!target) { setLegend(g.container, 'Aucun champ "Siège" trouvé.'); return; }
 
-      // Anti-doublon : si deja pris par un autre input
-      const already = g.seatToInput.get(label);
+      // Anti-doublon : si deja pris par un autre input (comparaison normalisée)
+      const labelNorm = normalizeSeatLabel(label);
+      const already = g.seatToInput.get(labelNorm);
       if (already && already !== target) {
         setLegend(g.container, 'Le siège ' + label + ' est déjà attribué.');
         return;
@@ -482,13 +498,13 @@
       g.inputToGuid.set(target, guid);
 
       // Liberer l'ancienne valeur de cet input (si existait)
-      const prevLabel = (target.value || '').trim();
-      if (prevLabel) g.seatToInput.delete(prevLabel);
+      const prevLabelNorm = normalizeSeatLabel(target.value || '');
+      if (prevLabelNorm) g.seatToInput.delete(prevLabelNorm);
 
       // Affecter valeur lisible
       target.value = label;
       target.dispatchEvent(new Event('change', { bubbles: true }));
-      g.seatToInput.set(label, target);
+      g.seatToInput.set(labelNorm, target);
 
 
       // Visuel : marquer TOUS les sieges selectionnes dans le formulaire
@@ -731,13 +747,57 @@
     }
 
     // 2) Focus = input actif + protection anti-copie Pretix
+    //    Blur = si la valeur a changé (effacée ou retapée manuellement) pendant que
+    //    le champ était actif, on libère l'ancien hold serveur et, si la nouvelle
+    //    valeur correspond à un siège libre, on la réserve à son tour. On réagit
+    //    volontairement sur "blur" (perte de focus) et non sur chaque frappe : ça
+    //    évite de spammer le serveur à chaque caractère supprimé/tapé, tout en
+    //    libérant bien le siège dès que l'utilisateur quitte un champ vidé.
     g.inputs.forEach(inp => {
       inp.removeEventListener?.('focus', onFocusSeatInput);
       inp.addEventListener('focus', onFocusSeatInput);
+      inp.removeEventListener?.('blur', onBlurSeatInput);
+      inp.addEventListener('blur', onBlurSeatInput);
       // Pretix skip les éléments dans .js-do-not-copy-answers lors du "copier les réponses"
       inp.classList.add('js-do-not-copy-answers');
     });
-    function onFocusSeatInput(e) { setActiveInput(e.currentTarget); }
+    function onFocusSeatInput(e) {
+      setActiveInput(e.currentTarget);
+      e.currentTarget.dataset.seatValueOnFocus = e.currentTarget.value || '';
+    }
+    async function onBlurSeatInput(e) {
+      const input = e.currentTarget;
+      const before = (input.dataset.seatValueOnFocus ?? '').trim();
+      const after = (input.value || '').trim();
+      delete input.dataset.seatValueOnFocus;
+      // Comparaison normalisée: reformuler "A-1" en "a1" ne doit pas déclencher
+      // un aller-retour réseau inutile puisque c'est le même siège.
+      if (normalizeSeatLabel(before) === normalizeSeatLabel(after)) return;
+
+      const prevGuid = g.inputToGuid.get(input);
+      const beforeNorm = normalizeSeatLabel(before);
+      if (beforeNorm) g.seatToInput.delete(beforeNorm);
+      if (prevGuid) {
+        tryReleaseHold(cfg, prevGuid, findCartPosId(input) || 0); // fire-and-forget
+        g.inputToGuid.delete(input);
+      }
+
+      if (after) {
+        // Saisie manuelle: si elle correspond à un siège connu et libre, on le
+        // réserve aussi, avec la même protection que via un clic sur le plan.
+        const guid = guidFromLabel(after, cfg.prefix || '');
+        const afterNorm = normalizeSeatLabel(after);
+        const already = g.seatToInput.get(afterNorm);
+        if (guid && (!already || already === input)) {
+          const ok = await tryHoldIfConfigured(cfg, guid, input);
+          if (ok) {
+            g.inputToGuid.set(input, guid);
+            g.seatToInput.set(afterNorm, input);
+          }
+        }
+      }
+      if (g.svg) refreshSelectedVisuals(g.svg, cfg);
+    }
 
     // 3) Conteneur unique
     g.container = ensureSingleContainer();
@@ -823,11 +883,13 @@
         return false;
       }
 
-      // 2) Vérifier l'unicité
+      // 2) Vérifier l'unicité (comparaison normalisée: "A-1" et "a1" comptent
+      //    comme le même siège, pour attraper les doublons saisis manuellement
+      //    dans des formats différents)
       const seen = new Map();
       const duplicates = [];
       for (const inp of inputs) {
-        const val = (inp.value || '').trim();
+        const val = normalizeSeatLabel(inp.value || '');
         if (seen.has(val)) {
           duplicates.push(inp);
           duplicates.push(seen.get(val));
@@ -874,19 +936,27 @@
           }
         }
 
+        const invalid = [];
         const unavailable = [];
 
         for (const inp of inputs) {
           const label = (inp.value || '').trim();
           const guid = guidFromLabel(label, prefix);
-          if (guid && (sold.has(guid) || (held.has(guid) && !ownGuids.has(guid)))) {
+          if (!guid) {
+            // Le libellé saisi ne correspond à aucun siège du plan, même en
+            // tolérant la casse/espaces/tirets: avant ce correctif, un tel
+            // champ était simplement ignoré par ce contrôle et laissait
+            // passer la commande sans jamais avoir de siège valide.
+            invalid.push(inp);
+          } else if (sold.has(guid) || (held.has(guid) && !ownGuids.has(guid))) {
             unavailable.push(inp);
           }
         }
 
-        if (unavailable.length) {
+        if (invalid.length || unavailable.length) {
+          invalid.forEach(i => showSeatError(i, 'Ce numéro de siège n\'existe pas. Veuillez sélectionner une place sur le plan.'));
           unavailable.forEach(i => showSeatError(i, 'Ce siège n\'est plus disponible. Veuillez en choisir un autre.'));
-          unavailable[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          (invalid[0] || unavailable[0]).scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
         }
 
@@ -901,10 +971,12 @@
    */
   function guidFromLabel(label, prefix) {
     if (!g.svg || !label) return null;
+    const norm = normalizeSeatLabel(label);
+    if (!norm) return null;
     const sel = prefix ? `[id^='${prefix}']` : '[id]';
     for (const node of g.svg.querySelectorAll(sel)) {
-      const nodeLabel = (node.getAttribute('data-seat-label') || '').trim();
-      if (nodeLabel === label) {
+      const nodeLabel = node.getAttribute('data-seat-label') || '';
+      if (normalizeSeatLabel(nodeLabel) === norm) {
         const rawId = node.getAttribute('id') || '';
         return prefix && rawId.startsWith(prefix) ? rawId.substring(prefix.length) : rawId;
       }
