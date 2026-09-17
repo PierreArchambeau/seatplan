@@ -154,6 +154,7 @@ def audit(request, organizer, event):
         return redirect('plugins:pretix_simpleseatingplan:settings', organizer=organizer, event=event)
 
     result = None
+    audit_plan = None
     if not cfg.item_id or not cfg.question_label_id:
         messages.warning(request, 'Seating plan is not fully configured yet (missing ticket item or seat question).')
     else:
@@ -165,8 +166,22 @@ def audit(request, organizer, event):
                 messages.success(request, '%d missing seat assignment(s) fixed.' % fixed_count)
             else:
                 messages.info(request, 'Nothing to fix.')
+
+        if cfg.svg:
+            _purge_expired(ev)
+            # Strip any inline <style> blocks to comply with CSP (style-src 'self'),
+            # same treatment as the presale seat picker's config_js.
+            clean_svg = re.sub(r'<style[^>]*>[\s\S]*?</style>', '', cfg.svg, flags=re.IGNORECASE)
+            audit_plan = {
+                'svg': clean_svg,
+                'prefix': cfg.seat_id_prefix,
+                'sold': list(SeatAssignment.objects.filter(event=ev).values_list('seat_guid', flat=True)),
+                'held': list(SeatHold.objects.filter(event=ev).values_list('seat_guid', flat=True)),
+                'conflict': [c['seat_guid'] for c in result['conflicts']],
+                'missing': [r['seat_guid'] for r in result['resolved']],
+            }
     return render(request, 'pretix_simpleseatingplan/control/audit.html', {
-        'event': ev, 'cfg': cfg, 'result': result,
+        'event': ev, 'cfg': cfg, 'result': result, 'audit_plan': audit_plan,
     })
 
 def plan_svg(request, organizer, event, **kwargs):
