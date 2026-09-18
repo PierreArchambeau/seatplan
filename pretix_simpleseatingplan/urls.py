@@ -3,6 +3,7 @@ from . import views
 
 urlpatterns = [
     re_path(r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/simpleseatingplan/$", views.settings, name="settings"),
+    re_path(r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/simpleseatingplan/audit/$", views.audit, name="audit"),
 ]
 
 event_patterns = [
