@@ -15,6 +15,7 @@ from .forms import SeatingSettingsForm
 from .models import SeatingConfig, Seat, SeatHold, SeatAssignment
 from .audit import run_seat_audit
 from .holds import claim_seat
+from .tickets import invalidate_tickets
 from .svg_sanitize import SvgSanitizeError, clean_plan_svg, sanitize_svg
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
@@ -172,6 +173,7 @@ def _import_plan(event, cfg, json_file, svg_file):
     count = _replace_seats(event, seats)
     cfg.svg = svg
     cfg.save()
+    invalidate_tickets(event)  # tickets already generated show the previous plan
     return count
 
 @event_permission_required('event.settings.general:write')

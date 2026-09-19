@@ -249,6 +249,17 @@ Each item below is covered by regression tests in `tests/backend/`.
 
 ## Troubleshooting
 
+### The seating plan is missing from the ticket PDF
+pretix draws a grey box (or nothing) whatever the cause, and swallows the error. Run the diagnostic **on the server, in the same Python environment as the pretix web and Celery workers**:
+
+```
+python -m pretix simpleseating_ticket_check organizer/event --order ABCDE
+```
+
+(with the official Docker image: `docker exec -it pretix pretix simpleseating_ticket_check organizer/event --order ABCDE`). It checks, in order: the plugin configuration; that the stored plan passes the sanitizer and contains seat ids with the configured prefix; that cairosvg and libcairo load and can draw; that the ticket layout used by the item contains an image element with the content *Seating plan with purchased seat highlighted*; the seat recorded for the order; a real PDF (does it contain the image?); and cached tickets. `--png file.png` saves the drawn plan, `--clear-cache` deletes the order's cached tickets so they are regenerated.
+
+Usual causes, most frequent first: the image element was never added to the ticket layout used by that item; the Celery workers run in another environment (no `cairosvg`/`libcairo`) or were not restarted after installing them; a ticket was cached before the seat was recorded (fixed for the future: the plugin now invalidates cached tickets when it changes a seat assignment or the plan); the order has no recorded seat (run `simpleseating_audit`); the plan was rejected by the sanitizer.
+
 ### Seats are not importing
 
 - Verify that the JSON/SVG contains seat identifiers (`seat_guid` or `id`)

@@ -12,6 +12,7 @@ from pretix.base.models import Order, OrderPosition
 
 from .models import SeatAssignment
 from .seat_matching import build_label_index, match_seat_by_label
+from .tickets import invalidate_tickets
 
 
 def run_seat_audit(event, cfg, fix=False):
@@ -89,6 +90,9 @@ def run_seat_audit(event, cfg, fix=False):
                     event=event, seat_guid=seat_guid, defaults={'order_position_id': pos.id}
                 )
             fixed = created
+            if created:
+                # a ticket generated while this seat was unrecorded shows no plan
+                invalidate_tickets(event, order)
         resolved.append({
             'order': order,
             'position': pos,

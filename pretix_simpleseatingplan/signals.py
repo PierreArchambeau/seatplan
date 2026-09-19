@@ -17,6 +17,7 @@ from pretix.base.signals import validate_cart, validate_order, order_placed, ord
 from pretix.control.signals import nav_event_settings
 from pretix.presale.signals import html_head
 from .holds import claim_seat
+from .tickets import invalidate_tickets
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
 from .seat_matching import build_label_index, match_seat_by_label, find_misplaced_seat_answer
 from .ticket_image import resolve_seat_for_position, render_seat_plan_png
@@ -548,6 +549,7 @@ def on_order_modified(sender, order, **kwargs):
         meta_dict['seat_number'] = new_seat.label
         op.meta_info = json_module.dumps(meta_dict)
         op.save(update_fields=['meta_info'])
+        invalidate_tickets(event, order)  # the printed plan must show the new seat
 
 
 class SeatConflictLogEntryType(OrderLogEntryType):
