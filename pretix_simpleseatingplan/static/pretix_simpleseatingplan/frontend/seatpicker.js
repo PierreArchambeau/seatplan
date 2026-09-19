@@ -725,16 +725,18 @@
 
     // 0) Vérifier que la question seat-label est présente sur cette page
     if (cfg.question_label_id && !isQuestionOnPage(cfg.question_label_id)) {
-      // N'afficher le message d'attente que sur les étapes de checkout
-      // *avant* l'étape "questions" (où le plan de salle est proposé) :
-      // "addons", "customer", "membership". Une fois l'étape "questions"
-      // passée (paiement, confirmation, page de commande après paiement),
-      // le message n'est plus pertinent.
-      var stepMatch = /\/checkout\/([^/]+)\//.exec(window.location.pathname);
-      var currentStep = stepMatch ? stepMatch[1] : null;
-      var isEarlyCheckoutStep = currentStep && ['addons', 'customer', 'membership', 'start'].indexOf(currentStep) !== -1;
+      // N'afficher le message d'attente que tant qu'on n'a pas dépassé
+      // l'étape "questions" (où le plan de salle est proposé) : une fois
+      // sur le paiement, la confirmation, ou la page de commande après
+      // paiement (URL /order/..., hors tunnel /checkout/), le message
+      // n'est plus pertinent. On liste les étapes "tardives" plutôt que
+      // les étapes "précoces" car ces dernières varient selon la
+      // configuration de l'événement (addons/customer/membership activés
+      // ou non) alors que payment/confirm/order existent toujours.
+      var isLateCheckoutStep = /\/checkout\/(payment|confirm)\b/.test(window.location.pathname)
+        || /\/order\//.test(window.location.pathname);
       // Afficher un message d'information si on est sur une page de checkout (présence du formulaire)
-      var form = isEarlyCheckoutStep && document.querySelector('form.checkout-form, form.form-horizontal, main form');
+      var form = !isLateCheckoutStep && document.querySelector('form.checkout-form, form.form-horizontal, main form');
       if (form && !document.getElementById('seat-checkout-notice')) {
         var notice = document.createElement('div');
         notice.id = 'seat-checkout-notice';
