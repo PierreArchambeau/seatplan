@@ -823,7 +823,7 @@
       +     '<li>Cliquez ensuite sur le plan pour s\u00e9lectionner une place. R\u00e9p\u00e9tez pour chaque participant.</li>'
       +     '<li>Les places sélectionn\u00e9es vont appara\u00eetre dans le champs "Si\u00e8ge" de chaque billet.</li>'
       +     '<li>Pour modifier une place, cliquez d\u2019abord sur le champ correspondant ci-dessous, puis s\u00e9lectionnez la nouvelle place sur le plan.</li>'
-      +     '<li>Vous pouvez \u00e9galement encoder manuellement les places. Le plan se mettra \u00e0 jour automatiquement.</li>'
+      +     '<li>Vous pouvez \u00e9galement encoder manuellement les places, au format \u00ab\u00a0Lettre de rang\u00e9e-Num\u00e9ro de si\u00e8ge\u00a0\u00bb (ex\u00a0: A-12). Le plan se mettra \u00e0 jour automatiquement.</li>'
       +   '</ol>'
       + '</div>'
       + '<div class="seat-viewport">'

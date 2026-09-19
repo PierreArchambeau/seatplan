@@ -260,6 +260,27 @@ def on_validate_order(sender, positions, **kwargs):
                 used_hold_ids.add(h.id)
                 break
 
+        # When resolved via the hold, force the "Seat" answer text to match
+        # the held seat's canonical label. This matters because order
+        # creation (OrderPosition.transform_cart_positions) copies this
+        # CartPosition into a brand new OrderPosition with its own,
+        # unrelated primary key -- order_placed can no longer look this
+        # hold up by cart_position_id afterwards, so it re-derives the seat
+        # purely from this answer text. Without this sync, a hold that
+        # doesn't match whatever text happens to be in the field (e.g. the
+        # customer clicked a seat, then edited the text field by hand
+        # without it registering) would pass validation here but leave the
+        # seat unassigned after payment -- exactly the "unmatched" bug this
+        # fixes.
+        if seat_guid and cfg.question_label_id:
+            seat_obj = Seat.objects.filter(event=event, seat_guid=seat_guid).first()
+            if seat_obj and seat_obj.label:
+                from pretix.base.models import QuestionAnswer
+                QuestionAnswer.objects.update_or_create(
+                    cartposition=p, question_id=cfg.question_label_id,
+                    defaults={'answer': seat_obj.label},
+                )
+
         # 2) Seat label answer -> find seat_guid by normalized label match.
         #    Tolerates manual entry with different case/spacing/dashes
         #    (e.g. "a12" / "A 12" / "A-012" all match seat "A-12").
@@ -317,16 +338,16 @@ def on_order_placed(sender, order, **kwargs):
         seat_guid = None
         seat_label = None
 
-        # 1) Hold by exact cart_position_id (same priority as validation)
-        hold = SeatHold.objects.filter(event=event, cart_position_id=op.id).first()
-        if hold and hold.seat_guid not in assigned_guids:
-            seat = Seat.objects.filter(event=event, seat_guid=hold.seat_guid).first()
-            if seat:
-                seat_guid = seat.seat_guid
-                seat_label = seat.label
-
-        # 2) Seat label answer -> normalized label match (manual entry)
-        if not seat_guid and cfg.question_label_id:
+        # Match by the "Seat" answer text. Note: there is deliberately no
+        # "hold by cart_position_id" lookup here (there used to be one) --
+        # by the time order_placed fires, `op` is a brand new OrderPosition
+        # with its own primary key, unrelated to the CartPosition.id the
+        # SeatHold was recorded against (OrderPosition.transform_cart_positions
+        # creates fresh rows, it doesn't preserve the id). That lookup could
+        # therefore never actually find the hold. Instead, on_validate_order
+        # now forces the answer text to match the held seat's label before
+        # the order is created, so this text-based match is reliable.
+        if cfg.question_label_id:
             ans = op.answers.filter(question_id=cfg.question_label_id).first()
             if ans and ans.answer:
                 seat = match_seat_by_label(label_index, ans.answer)
