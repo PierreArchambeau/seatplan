@@ -130,12 +130,12 @@ Each line maps a category name to a Pretix variation ID.
 
 ## Security
 
-- **Session Verification** : All cart/checkout endpoints verify a valid session or authentication
-- **Owner Verification** : The `/release` endpoint only allows users to release their own seat holds (by validating `cart_position_id`)
-- **Input Validation** : All user inputs are validated (seat_guid, cartpos_id converted to integers)
-- **XSS Protection** : SVGs are served with appropriate headers (`X-Content-Type-Options: nosniff`)
-- **Transaction Atomicity** : Reservations use Django transactions to prevent race conditions and double-booking
-- **CSRF Protection** : Form endpoints use Django's CSRF middleware
+- **Holds belong to a cart** : `/hold` and `/release` only accept a `cartpos_id` that is a cart position of the caller's own pretix cart (checked against `session['carts']`). Nobody can hold, steal or release a seat on behalf of another shopper, and each cart position holds at most one seat at a time.
+- **Server-side exclusivity** : the final order validation goes through the same `claim_seat()` primitive as `/hold`, so a seat somebody else is in the middle of buying is refused even if its label is typed by hand, and two buyers typing the same free seat cannot both pass validation.
+- **SVG sanitization** : the plan is rebuilt through an allow-list (`svg_sanitize.py`) at import **and** on every output path (checkout `config.js`, control-panel preview, audit page, `plan.svg`, ticket image). Scripts, event handlers, `<foreignObject>`, `<style>`, external references and XML entity declarations are dropped.
+- **Least privilege** : the seat audit needs "view orders" in addition to "change settings"; applying its fix needs "change orders".
+- **Transaction Atomicity** : plan imports run in one transaction (a failed import leaves the previous seats intact); holds rely on the `(event, seat_guid)` unique constraint.
+- **CSRF Protection** : POST endpoints use Django's CSRF middleware
 
 ## How Seat Selection and Storage Works
 
@@ -183,67 +183,53 @@ Seat information is stored across multiple places for different purposes:
 
 ### Attack Prevention
 
-The plugin implements multiple security layers to prevent common attacks:
+Each item below is covered by regression tests in `tests/backend/`.
 
-#### 1. **Cross-User Hold Theft** (FIXED)
-- **Vulnerability**: A user could release another user's seat reservation
-- **Prevention**: The `/release` endpoint requires the correct `cart_position_id` - users can only release holds they created
-- **Implementation**: Deletion filter includes `cart_position_id` in the WHERE clause
+#### 1. **Forged or stolen holds** (`test_holds_security.py`)
+- **Vulnerability**: `cartpos_id` came straight from the browser and was never checked. An attacker could create a hold carrying *someone else's* cart position id, which `validate_order` then trusted to overwrite that person's "Seat" answer; steal other holds; release other holds; or hold every seat of the plan.
+- **Prevention**: `hold()` and `release()` verify that the cart position belongs to a cart of the requester's session (`_owns_cart_position`). A live hold of another cart position is never overwritten (409). A cart position can hold only one seat at a time. Holds whose cart no longer exists ("orphaned") can be taken over.
 
-#### 2. **Double-Booking Prevention**
-- **Vulnerability**: Two users could book the same seat in a race condition
-- **Prevention**:
-  - `hold()` endpoint uses Django's `transaction.atomic()` for atomicity
-  - Unique constraint on `(event, seat_guid)` in `SeatHold` model
-  - Returns `IntegrityError` (409 Conflict) if seat is already held
-- **Flow**: Check → Create in atomic block prevents TOCTOU race conditions
+#### 2. **Double-booking** (`test_order_flow.py`)
+- **Vulnerability**: holds were advisory; `validate_order` only refused seats already *sold*, and it runs before pretix takes its order lock.
+- **Prevention**: `holds.claim_seat()` creates the hold atomically (unique constraint on `(event, seat_guid)`). `validate_order` claims the seat for the position, so a seat held by another cart is refused and two simultaneous buyers cannot both succeed.
+- **Residual risk**: orders created outside the checkout (REST API, imports, staff edits in the control panel) bypass `validate_order`. The seat audit page reports the resulting conflicts.
 
-#### 3. **Session Hijacking / Unauthorized Access**
-- **Vulnerability**: Users without an active session could manipulate holds
-- **Prevention**:
-  - All cart/checkout endpoints verify valid session: `request.session.session_key` OR `request.user.is_authenticated`
-  - Unauthenticated requests get 403 Forbidden
-- **Scope**: `/hold`, `/release`, `/status`, `/config.js` all protected
+#### 3. **Session requirement** (`test_hardening.py`)
+- `/status`, `/hold`, `/release` and `/config.js` require a session. This is only a coarse filter (any visitor has a session); the ownership check in item 1 is the real protection.
+- `/status` is read-only (expired holds are filtered, not deleted) because every open checkout page polls it every second.
 
 #### 4. **Cross-Site Request Forgery (CSRF)**
-- **Vulnerability**: Malicious sites could trigger seat holds on behalf of users
-- **Prevention**:
-  - `POST` endpoints use Django's CSRF middleware
-  - `X-CSRFToken` header required (enforced by `postForm` in seatpicker.js)
-  - GET requests (status, config, SVG) don't modify state, so CSRF-safe
+- POST endpoints use Django's CSRF middleware; `X-CSRFToken` is sent by `postForm` in seatpicker.js.
 
-#### 5. **XSS via SVG Injection**
-- **Vulnerability**: Malicious SVG containing `<script>` tags could execute code
-- **Prevention**:
-  - `plan_svg()` endpoint sets headers:
-    - `X-Content-Type-Options: nosniff` - prevents browser content-type sniffing
-    - `Content-Disposition: inline` - controlled display mode
-  - SVG content is HTML-escaped when imported
-- **Note**: SVG filter element attacks are browser-specific; sanitization library not used but not necessary here as SVG is uploaded by admin
+#### 5. **XSS and content injection through the SVG** (`test_svg_sanitize.py`, `test_plan_import_security.py`)
+- **Vulnerability**: the uploaded SVG was `html.unescape()`d, stored as-is, injected with `innerHTML` into customers' checkout pages and rendered with `|safe` in the control panel. The JSON import interpolated category colours and radii into attributes unescaped.
+- **Prevention**: `svg_sanitize.sanitize_svg()` rebuilds the document from an allow-list of elements, attributes and values, rejects DOCTYPE entity declarations, and caps size (5 MB) and element count. It runs at import and, through `clean_plan_svg()`, on every output of the stored plan, because plans stored before this fix may be hostile. JSON colours are validated and radii must be numeric.
+- `plan.svg` is served sanitized with `X-Content-Type-Options: nosniff`. Do not add a `Content-Security-Policy` header to it: pretix already sets a strict one and its middleware crashes on directives it does not know (e.g. `sandbox`).
 
-#### 6. **Invalid Cart Position ID**
-- **Vulnerability**: Users could submit fake cart position IDs
-- **Prevention**:
-  - `hold()` and `release()` validate numeric cartpos_id format
-  - Invalid IDs are rejected with 400 Bad Request
-  - `release()` checks deletion count; returns 404 if no matching hold found
+#### 6. **Server-side requests from the ticket renderer**
+- The ticket image (cairosvg) only ever receives sanitized SVG, so `file://` / `http://` `<image>` references and XML entities never reach it.
 
-#### 7. **Sold Seat Bypass**
-- **Vulnerability**: Users could try to hold already-sold seats
-- **Prevention**:
-  - `hold()` checks `SeatAssignment.objects.filter(...).exists()` before allowing hold
-  - Returns 409 Conflict if seat is sold
-  - Prevents hold creation on purchased seats
+#### 7. **Import robustness** (`test_plan_import_security.py`)
+- Malformed, oversized or hostile uploads produce a form error and change nothing (transactional import). Duplicate seat ids in a JSON export no longer crash the import.
+
+#### 8. **Sold seat bypass**
+- `hold()` refuses sold seats (409) and unknown seats (400).
+
+#### 9. **Repository hygiene** (`test_repo_hygiene.py`)
+- The pretix data directory (`data/`, containing `.secret`, the instance SECRET_KEY) is git-ignored and must never be tracked.
 
 ### Endpoint Security Matrix
 
-| Endpoint | Method | Session Check | Validation | Atomic | CSRF |
-|----------|--------|--------------|------------|--------|------|
-| `/hold` | POST | ✓ | ✓ seat_guid, cartpos_id | ✓ | ✓ |
-| `/release` | POST | ✓ | ✓ + cart_position_id match | — | ✓ |
-| `/status` | GET | ✓ | ✓ event validation | — | — |
-| `/config.js` | GET | ✓ | ✓ question check | — | — |
-| `/plan.svg` | GET | — | ✓ event validation | — | — |
+| Endpoint | Method | Requirement | Validation | CSRF |
+|----------|--------|-------------|------------|------|
+| `/hold` | POST | session + cart ownership | seat_guid known & unsold, cartpos_id owned | yes |
+| `/release` | POST | session + cart ownership | hold must belong to that cart position | yes |
+| `/status` | GET | session | read-only | n/a |
+| `/config.js` | GET | session | plan sanitized on output | n/a |
+| `/plan.svg` | GET | none (public) | plan sanitized on output | n/a |
+| control `settings` | GET/POST | change settings | upload sanitized, transactional | yes |
+| control `audit` | GET | change settings + view orders | | n/a |
+| control `audit` (fix) | POST | + change orders | | yes |
 
 ### Recommended Deployment Practices
 
@@ -281,6 +267,8 @@ The plugin implements multiple security layers to prevent common attacks:
 ### Code Structure
 
 - `views.py` : Main views and API endpoints
+- `holds.py` : `claim_seat()`, the single atomic way to hold a seat
+- `svg_sanitize.py` : allow-list SVG sanitizer used on import and on every output
 - `models.py` : Data models
 - `forms.py` : Configuration forms
 - `urls.py` : URL routing
@@ -292,6 +280,17 @@ The plugin implements multiple security layers to prevent common attacks:
 
 - Django (via Pretix)
 - Pretix >= 2026.1.x
+- lxml, cairosvg (ticket image rendering; declared in `setup.cfg`)
+
+### Running the tests
+
+Backend tests run against a real pretix install with pretix's own test settings (in-memory database), from the plugin directory:
+
+```
+python -m django test tests.backend --settings=pretix.testutils.settings
+```
+
+The pretix environment must have the plugin installed (`pip install -e .`). See `tests/backend/README.md`. The front-end tests in `tests/js` run with `npm test` (needs Node).
 
 ## License and Support
 

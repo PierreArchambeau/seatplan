@@ -9,5 +9,5 @@
     {% csrf_token %}{% bootstrap_form form layout='horizontal' %}
     <div class='form-group submit-group'><div class='col-md-9 col-md-offset-3'><button type='submit' class='btn btn-primary'>{% trans 'Save' %}</button></div></div>
   </form>
-  {% if cfg.svg %}<hr><h3>{% trans 'SVG preview' %}</h3><div class='well' style='max-height:60vh; overflow:auto;'>{{ cfg.svg|safe }}</div>{% endif %}
+  {% if svg_preview %}<hr><h3>{% trans 'SVG preview' %}</h3><div class='well' style='max-height:60vh; overflow:auto;'>{{ svg_preview|safe }}</div>{% endif %}
 {% endblock %}

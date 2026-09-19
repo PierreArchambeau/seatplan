@@ -134,3 +134,6 @@ dmypy.json
 *.swo
 *~
 pretix_simpleseatingplan/migrations/__pycache__/*
+
+# pretix data directory: contains the instance SECRET_KEY (.secret), databases, logs, uploads
+data/

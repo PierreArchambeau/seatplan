@@ -8,6 +8,10 @@ Q_SEAT_LABEL = "simpleseating_seat_label"
 class SeatingSettingsForm(forms.ModelForm):
     svg_file = forms.FileField(required=False, label=_("SVG seating plan"))
     json_file = forms.FileField(required=False, label=_("JSON plan (seats.pretix.eu export)"))
+    hold_minutes = forms.IntegerField(
+        min_value=1, max_value=120, initial=10, label=_("Hold minutes"),
+        help_text=_("How long a selected seat stays reserved for a shopper who has not completed the order yet (1-120)."),
+    )
     item = forms.ModelChoiceField(queryset=Item.objects.none(), required=True, label=_("Ticket item"))
     category_variation_map = forms.CharField(required=False, widget=forms.Textarea(attrs={"rows":6, "placeholder":"Category I = 3\nCategory II = 4"}), label=_("Category → variation mapping (one per line, name=id)"))
     class Meta:

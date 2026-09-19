@@ -12,6 +12,7 @@ from pretix.base.services.orders import OrderError
 from pretix.base.signals import validate_cart, validate_order, order_placed, order_canceled, order_expired, order_modified, periodic_task
 from pretix.control.signals import nav_event_settings
 from pretix.presale.signals import html_head
+from .holds import claim_seat
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
 from .seat_matching import build_label_index, match_seat_by_label, find_misplaced_seat_answer
 from .ticket_image import resolve_seat_for_position, render_seat_plan_png
@@ -34,15 +35,19 @@ except ImportError:
 def nav_settings(sender, request, **kwargs):
     if not request.user.has_event_permission(request.organizer, request.event, 'can_change_settings'):
         return []
-    return [{
+    items = [{
         'label': _('Simple seating plan (SVG/JSON)'),
         'url': reverse('plugins:pretix_simpleseatingplan:settings', kwargs={'organizer': request.organizer.slug, 'event': request.event.slug}),
         'active': request.path_info.endswith('/simpleseatingplan/'),
-    }, {
-        'label': _('Seat audit'),
-        'url': reverse('plugins:pretix_simpleseatingplan:audit', kwargs={'organizer': request.organizer.slug, 'event': request.event.slug}),
-        'active': request.path_info.endswith('/simpleseatingplan/audit/'),
     }]
+    # The audit lists orders, so it needs the right to view them as well.
+    if request.user.has_event_permission(request.organizer, request.event, 'can_view_orders', request=request):
+        items.append({
+            'label': _('Seat audit'),
+            'url': reverse('plugins:pretix_simpleseatingplan:audit', kwargs={'organizer': request.organizer.slug, 'event': request.event.slug}),
+            'active': request.path_info.endswith('/simpleseatingplan/audit/'),
+        })
+    return items
 
 @receiver(html_head, dispatch_uid='simpleseating_html_head')
 def inject_presale_head(sender, request=None, **kwargs):
@@ -255,7 +260,8 @@ def on_validate_order(sender, positions, **kwargs):
         # 1) Hold by exact cart_position_id: the seat the customer actually
         #    clicked on the plan for this specific ticket.
         for h in all_holds:
-            if h.cart_position_id == p.id and h.id not in used_hold_ids and h.cart_position_id != 0:
+            if (h.cart_position_id == p.id and h.id not in used_hold_ids and h.cart_position_id != 0
+                    and h.seat_guid not in assigned_guids):
                 seat_guid = h.seat_guid
                 used_hold_ids.add(h.id)
                 break
@@ -290,7 +296,15 @@ def on_validate_order(sender, positions, **kwargs):
                 if ans and ans.answer and ans.answer.strip():
                     seat = match_seat_by_label(label_index, ans.answer)
                     if seat and seat.seat_guid not in assigned_guids:
-                        seat_guid = seat.seat_guid
+                        # Claim the seat for this position. The hold's unique
+                        # (event, seat) constraint makes this atomic, which is what
+                        # keeps two buyers who typed the same free seat at the same
+                        # time from both passing validation (this signal runs before
+                        # pretix takes its order lock). It also refuses a seat that
+                        # another buyer currently holds.
+                        expires = timezone.now() + timezone.timedelta(minutes=cfg.hold_minutes)
+                        if claim_seat(event, seat.seat_guid, p.id, expires):
+                            seat_guid = seat.seat_guid
             except Exception as e:
                 logger.warning(f"Error matching seat by label for position {p.id}: {e}")
 

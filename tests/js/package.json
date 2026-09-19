@@ -3,7 +3,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "test": "node --test ."
+    "test": "node --test"
   },
   "devDependencies": {
     "jsdom": "^25.0.1"

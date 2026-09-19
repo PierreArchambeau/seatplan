@@ -9,6 +9,7 @@ from lxml import etree
 
 from .models import Seat, SeatAssignment
 from .seat_matching import build_label_index, match_seat_by_label
+from .svg_sanitize import clean_plan_svg
 
 logger = logging.getLogger(__name__)
 
@@ -155,10 +156,14 @@ def _add_legend(root, seat_label):
 def render_seat_plan_png(event, cfg, seat_guid, seat_label, output_width=1600):
     """Returns PNG bytes with the given seat highlighted, or None if the
     plan SVG is missing/unparseable or the seat can't be located in it."""
-    if not cfg.svg:
+    # The stored plan is organizer-supplied and may pre-date sanitization; this
+    # also guarantees cairosvg never sees external references (file://, http://)
+    # or entity declarations.
+    svg = clean_plan_svg(cfg.svg)
+    if not svg:
         return None
     try:
-        root = etree.fromstring(cfg.svg.encode('utf-8'))
+        root = etree.fromstring(svg.encode('utf-8'))
     except etree.XMLSyntaxError:
         logger.warning("simpleseatingplan: could not parse plan SVG for event %s", event.slug)
         return None
