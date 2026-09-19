@@ -1,0 +1,11 @@
+{
+  "name": "pretix-simpleseatingplan-js-tests",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test ."
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

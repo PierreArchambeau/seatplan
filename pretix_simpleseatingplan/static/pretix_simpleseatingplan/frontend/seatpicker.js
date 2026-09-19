@@ -432,8 +432,13 @@
 
     // Collecter les labels normalisés de tous les champs seat remplis, pour
     // reconnaître une saisie manuelle même mal formatée (ex: "a1" == "A-1").
+    // On ignore les champs dont la dernière tentative de réservation a été
+    // rejetée par le serveur (siège vendu/déjà tenu) : leur texte reste
+    // affiché pour que l'utilisateur voie ce qu'il a tapé, mais il ne doit
+    // pas faire passer ce siège pour "sélectionné" sur le plan.
     const selectedLabels = new Set();
     for (const inp of g.inputs) {
+      if (inp.dataset.seatHoldFailed === '1') continue;
       const norm = normalizeSeatLabel(inp.value || '');
       if (norm) selectedLabels.add(norm);
     }
@@ -763,10 +768,23 @@
     //    volontairement sur "blur" (perte de focus) et non sur chaque frappe : ça
     //    évite de spammer le serveur à chaque caractère supprimé/tapé, tout en
     //    libérant bien le siège dès que l'utilisateur quitte un champ vidé.
+    //
+    //    boot() est rappelé plusieurs fois par page (setTimeout x5,
+    //    MutationObserver, évènement pretix:ui:changed...) pour attraper les
+    //    champs Seat qui apparaissent après coup (ex: augmentation de
+    //    quantité). onFocusSeatInput/onBlurSeatInput étant redéfinis à
+    //    chaque appel, removeEventListener ne pouvait jamais retrouver la
+    //    closure ajoutée par un appel précédent : chaque nouveau boot()
+    //    empilait donc un listener 'blur' supplémentaire sur les champs déjà
+    //    connus. Au blur, TOUS ces listeners dupliqués réservaient le même
+    //    siège en parallèle -- un seul gagnait la contrainte d'unicité côté
+    //    serveur, les autres recevaient 'held' ("déjà réservé par un autre
+    //    utilisateur") même pour un siège réellement libre. On ne bind donc
+    //    plus qu'une seule fois par champ, quel que soit le nombre d'appels.
     g.inputs.forEach(inp => {
-      inp.removeEventListener?.('focus', onFocusSeatInput);
+      if (inp.dataset.seatListenersBound) return;
+      inp.dataset.seatListenersBound = '1';
       inp.addEventListener('focus', onFocusSeatInput);
-      inp.removeEventListener?.('blur', onBlurSeatInput);
       inp.addEventListener('blur', onBlurSeatInput);
       // Pretix skip les éléments dans .js-do-not-copy-answers lors du "copier les réponses"
       inp.classList.add('js-do-not-copy-answers');
@@ -792,6 +810,12 @@
         g.inputToGuid.delete(input);
       }
 
+      // Le texte tapé ne doit être peint "sélectionné" (bleu) sur le plan que
+      // si la réservation a réellement réussi -- sinon un siège vendu/déjà
+      // tenu, rejeté par le serveur, reste affiché en bleu par
+      // refreshSelectedVisuals() alors même que le clic sur ce même siège
+      // est bloqué. On mémorise donc l'échec sur le champ lui-même.
+      input.removeAttribute('data-seat-hold-failed');
       if (after) {
         // Saisie manuelle: si elle correspond à un siège connu et libre, on le
         // réserve aussi, avec la même protection que via un clic sur le plan.
@@ -803,6 +827,8 @@
           if (ok) {
             g.inputToGuid.set(input, guid);
             g.seatToInput.set(afterNorm, input);
+          } else {
+            input.setAttribute('data-seat-hold-failed', '1');
           }
         }
       }
