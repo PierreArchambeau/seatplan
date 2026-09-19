@@ -43,6 +43,9 @@ to the test results (look at the `Ran N tests ... OK` line).
 | `test_audit_command.py` | the audit logic (never overwrites a sale, ignores cancelled orders, idempotent fix) and the `simpleseating_audit` command, run with no django-scopes scope active like the real CLI |
 | `test_out_of_checkout.py` | seats sold outside the checkout: real `_perform_order` (refused and rolled back), real REST API (kept, conflict recorded), edits after the fact, order history texts |
 | `test_ticket_image.py` | the ticket plan image: real PNG pixels, shape highlighting, layout image variable |
+| `test_ticket_pdf.py` | real ticket PDFs from pretix's PDF output: the plan is on the page, the right seat is highlighted (pixel checks), one page per ticket, grey placeholder when no seat resolves |
+| `test_banktransfer_qr.py` | bank transfer payment on the real order page: payment details and the QR payload (valid EPC / BezahlCode), and no QR when it would be wrong. Runs for a German account and for the real Belgian account of the Lions Club de Huy (BNP Paribas Fortis, EPC QR only) |
+| `test_banktransfer_qr_browser.py` | the same QR as a real headless Edge/Chrome displays it: screenshot taken, QR decoded, compared with the expected payload. Skipped without a browser or `pip install zxing-cpp`; `SEATPLAN_SKIP_BROWSER_TESTS=1` skips it, `SEATPLAN_TEST_BROWSER` points to a browser, `SEATPLAN_KEEP_SCREENSHOT=<file>` saves the screenshot |
 | `test_signals_misc.py` | navigation, presale `<head>`, category mapping, `order_placed`/`order_modified` branches, expiry |
 | `test_hardening.py` | read-only `status` polling, `hold_minutes` bounds |
 | `test_repo_hygiene.py` | secrets / the pretix data directory are not tracked by git |
