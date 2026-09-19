@@ -210,6 +210,10 @@ Each item below is covered by regression tests in `tests/backend/`.
 - **Prevention**: `svg_sanitize.sanitize_svg()` rebuilds the document from an allow-list of elements, attributes and values, rejects DOCTYPE entity declarations, and caps size (5 MB) and element count. It runs at import and, through `clean_plan_svg()`, on every output of the stored plan, because plans stored before this fix may be hostile. JSON colours are validated and radii must be numeric.
 - `plan.svg` is served sanitized with `X-Content-Type-Options: nosniff`. Do not add a `Content-Security-Policy` header to it: pretix already sets a strict one and its middleware crashes on directives it does not know (e.g. `sandbox`).
 
+#### 5b. **Finding the seat on the ticket** (`test_ticket_image.py`, `test_ticket_pdf.py`)
+- The ticket plan draws every seat except the purchased one at 30 % opacity, and the purchased seat in a saturated colour with a thick outline and a dashed ring, so it stands out whatever colours the plan uses and when printed in black and white. It is red, or blue if the seat itself is reddish (a plan with all-red seats made a red highlight invisible). Non-seat elements (stage, labels) are not faded. The tests measure real pixels against every other seat, in colour and in grey scale.
+- Already generated tickets are cached by pretix: re-upload the plan (which invalidates every cached ticket of the event) or run `simpleseating_ticket_check --order CODE --clear-cache` to see the new highlight on existing orders.
+
 #### 6. **Server-side requests from the ticket renderer**
 - The ticket image (cairosvg) only ever receives sanitized SVG, so `file://` / `http://` `<image>` references and XML entities never reach it.
 

@@ -3,7 +3,9 @@ Renders the configured seating plan SVG as a PNG with the purchased seat
 highlighted, for use as a dynamic ticket image via pretix's
 ``layout_image_variables`` signal (see signals.py).
 """
+import colorsys
 import logging
+import re
 
 from lxml import etree
 
@@ -14,10 +16,50 @@ from .svg_sanitize import clean_plan_svg
 logger = logging.getLogger(__name__)
 
 NS_SVG = 'http://www.w3.org/2000/svg'
+# The purchased seat is drawn in a saturated colour on a plan whose OTHER seats are faded, so it stands out
+# whatever colours the plan uses, in colour and when the ticket is printed in black and white. Red is the
+# standard; if the seat is itself reddish (a plan with red seats), blue is used instead.
 HIGHLIGHT_FILL = '#ef4444'
 HIGHLIGHT_STROKE = '#7f1d1d'
 HALO_STROKE = '#ef4444'
+HIGHLIGHT_FILL_ALT = '#2563eb'
+HIGHLIGHT_STROKE_ALT = '#1e3a8a'
+HALO_STROKE_ALT = '#2563eb'
+FADE_OPACITY = '0.3'
 SHAPE_TAGS = {'circle', 'ellipse', 'rect', 'path', 'polygon', 'polyline', 'line'}
+
+_NAMED_REDS = {'red', 'crimson', 'firebrick', 'darkred', 'tomato', 'orangered', 'indianred', 'maroon', 'brown'}
+_HEX_RE = re.compile(r'^#([0-9a-f]{3}|[0-9a-f]{6})$', re.IGNORECASE)
+_RGB_RE = re.compile(r'^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)', re.IGNORECASE)
+
+
+def _is_reddish(colour):
+    """True for colours a red highlight would not stand out against."""
+    colour = (colour or '').strip().lower()
+    if colour in _NAMED_REDS:
+        return True
+    m = _HEX_RE.match(colour)
+    if m:
+        h = m.group(1)
+        if len(h) == 3:
+            h = ''.join(c * 2 for c in h)
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    else:
+        m = _RGB_RE.match(colour)
+        if not m:
+            return False
+        r, g, b = (min(255, int(v)) for v in m.groups())
+    hue, saturation, value = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
+    return (hue <= 0.04 or hue >= 0.94) and saturation >= 0.35 and value >= 0.3
+
+
+def _shape_fill(shape):
+    """The fill a shape declares, as attribute or inline style (None if it does not)."""
+    fill = shape.get('fill')
+    if not fill:
+        m = re.search(r'(?:^|;)\s*fill\s*:\s*([^;]+)', shape.get('style') or '')
+        fill = m.group(1).strip() if m else None
+    return fill
 
 
 def resolve_seat_for_position(event, cfg, position):
@@ -59,10 +101,11 @@ def _find_seat_element(root, prefix, seat_guid):
 
 def _highlight_element(el):
     """
-    Recolors the matched seat shape(s) in place. For circle/ellipse seats
-    (the shape our own plan editor generates) it also adds a dashed halo
-    ring around them, so the seat is still identifiable by shape alone on
-    a black & white print, not just by color.
+    Recolors the matched seat shape(s) in place, in a saturated colour that
+    contrasts with the seat's own colour (see HIGHLIGHT_FILL). For
+    circle/ellipse seats (the shape our own plan editor generates) it also
+    adds a dashed halo ring around them, so the seat is still identifiable by
+    shape alone on a black & white print, not just by color.
     """
     shapes = [el] if etree.QName(el).localname in SHAPE_TAGS else [
         d for d in el.iter() if etree.QName(d).localname in SHAPE_TAGS
@@ -70,11 +113,17 @@ def _highlight_element(el):
     if not shapes:
         return False
 
+    original = next((f for f in (_shape_fill(sh) for sh in shapes) if f and f.lower() != 'none'), None)
+    if _is_reddish(original):
+        fill, stroke, halo_stroke = HIGHLIGHT_FILL_ALT, HIGHLIGHT_STROKE_ALT, HALO_STROKE_ALT
+    else:
+        fill, stroke, halo_stroke = HIGHLIGHT_FILL, HIGHLIGHT_STROKE, HALO_STROKE
+
     for shape in shapes:
         tag = etree.QName(shape).localname
         shape.attrib.pop('style', None)
-        shape.set('fill', HIGHLIGHT_FILL)
-        shape.set('stroke', HIGHLIGHT_STROKE)
+        shape.set('fill', fill)
+        shape.set('stroke', stroke)
         shape.set('stroke-width', '3')
 
         halo = None
@@ -105,12 +154,29 @@ def _highlight_element(el):
 
         if halo is not None:
             halo.set('fill', 'none')
-            halo.set('stroke', HALO_STROKE)
+            halo.set('stroke', halo_stroke)
             halo.set('stroke-width', '3')
             halo.set('stroke-dasharray', '4,3')
             shape.addprevious(halo)
 
     return True
+
+
+def _fade_other_seats(root, prefix, target):
+    """Washes out every seat except `target`, so the purchased seat is the only
+    saturated thing on the plan. Everything that is not a seat (stage, labels,
+    sections) is left alone."""
+    for node in root.iter():
+        if node is target or not isinstance(node.tag, str):
+            continue
+        node_id = node.get('id') or ''
+        is_seat = (prefix and node_id.startswith(prefix)) or node.get('data-seat-id') is not None
+        if not is_seat:
+            continue
+        # never fade something that contains the target (a seat nested in a bigger element)
+        if target is not None and target in node.iterdescendants():
+            continue
+        node.set('opacity', FADE_OPACITY)
 
 
 def _canvas_size(root):
@@ -181,6 +247,7 @@ def render_seat_plan_png(event, cfg, seat_guid, seat_label, output_width=1600):
             seat_guid, cfg.seat_id_prefix or '', seat_guid, event.slug,
         )
         return None
+    _fade_other_seats(root, cfg.seat_id_prefix or '', el)
     if not _highlight_element(el):
         logger.warning(
             "simpleseatingplan: seat element '%s' found in plan SVG for event %s but contains no recognizable "

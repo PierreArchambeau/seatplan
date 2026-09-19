@@ -41,9 +41,10 @@ def is_red(rgb):
     return r > 200 and g < 110 and b < 110
 
 
-def is_green(rgb):
+def is_faded_green(rgb):
+    """Other seats are drawn at 30 % opacity: pale green on the white page."""
     r, g, b = rgb
-    return g > 150 and r < 110 and b < 140
+    return r > 150 and g > 200 and g - r > 25 and b > 150
 
 
 class TicketPdfTests(OrderFlowTestCase):
@@ -87,8 +88,8 @@ class TicketPdfTests(OrderFlowTestCase):
         plan = images[0]
         self.assertGreater(plan.width, 800, 'the plan is embedded at a printable resolution')
         self.assertTrue(is_red(self.seat_pixel(plan, 'a2')), 'purchased seat A-2 is highlighted: %r' % (self.seat_pixel(plan, 'a2'),))
-        self.assertTrue(is_green(self.seat_pixel(plan, 'a1')), 'A-1 is not: %r' % (self.seat_pixel(plan, 'a1'),))
-        self.assertTrue(is_green(self.seat_pixel(plan, 'a3')), 'A-3 is not: %r' % (self.seat_pixel(plan, 'a3'),))
+        self.assertTrue(is_faded_green(self.seat_pixel(plan, 'a1')), 'A-1 is not: %r' % (self.seat_pixel(plan, 'a1'),))
+        self.assertTrue(is_faded_green(self.seat_pixel(plan, 'a3')), 'A-3 is not: %r' % (self.seat_pixel(plan, 'a3'),))
 
     def test_each_position_of_an_order_gets_its_own_seat_highlighted(self):
         order, positions = self.paid_order('A-1', 'A-3')
@@ -96,8 +97,8 @@ class TicketPdfTests(OrderFlowTestCase):
         pages = self.page_images(data)
         self.assertEqual(len(pages), 2, 'one page per ticket')
         first, second = (p[0] for p in pages)
-        self.assertTrue(is_red(self.seat_pixel(first, 'a1')) and is_green(self.seat_pixel(first, 'a3')))
-        self.assertTrue(is_red(self.seat_pixel(second, 'a3')) and is_green(self.seat_pixel(second, 'a1')))
+        self.assertTrue(is_red(self.seat_pixel(first, 'a1')) and is_faded_green(self.seat_pixel(first, 'a3')))
+        self.assertTrue(is_red(self.seat_pixel(second, 'a3')) and is_faded_green(self.seat_pixel(second, 'a1')))
 
     def test_seat_label_legend_is_drawn_on_the_plan(self):
         order, (pos,) = self.paid_order('A-2')
@@ -139,6 +140,22 @@ class TicketPdfTests(OrderFlowTestCase):
         order, (pos,) = self.paid_order('A-1')
         (images,) = self.page_images(self.output().generate(pos)[2])
         self.assertTrue(is_red(self.seat_pixel(images[0], 'a1')))
+
+    def test_on_a_plan_where_every_seat_is_red_the_purchased_seat_is_still_easy_to_find(self):
+        """Reported from production: all seats red, highlight red too. Checked on the
+        real ticket, in colour and in grey scale (tickets are often printed black and white)."""
+        from pretix_simpleseatingplan.models import SeatingConfig
+        red = self.cfg.svg.replace('#22c55e', '#dc2626')
+        SeatingConfig.objects.filter(pk=self.cfg.pk).update(svg=red)
+        order, (pos,) = self.paid_order('A-2')
+        (images,) = self.page_images(self.output().generate(pos)[2])
+        plan = images[0]
+        chosen = self.seat_pixel(plan, 'a2')
+        for guid in ('a1', 'a3'):
+            other = self.seat_pixel(plan, guid)
+            self.assertGreater(sum((a - b) ** 2 for a, b in zip(chosen, other)) ** 0.5, 120, (chosen, other))
+            lum = lambda c: 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+            self.assertGreater(abs(lum(chosen) - lum(other)), 40, 'not distinguishable in black and white: %r vs %r' % (chosen, other))
 
     def test_highlight_colour_is_the_documented_one(self):
         self.assertEqual(HIGHLIGHT_FILL, '#ef4444')

@@ -161,16 +161,17 @@ class RenderTests(OrderFlowTestCase):
         self.assertEqual(image.width, 1600)
         scale = 1600 / 300
         red = hexrgb(HIGHLIGHT_FILL)
-        green = hexrgb('#22c55e')
+        faded_green = tuple(round(0.3 * c + 0.7 * 255) for c in hexrgb('#22c55e'))  # 30 % opacity on white
         self.assertEqual(pixel(png, int(90 * scale), int(50 * scale)), red, 'chosen seat A-2 is highlighted')
-        self.assertEqual(pixel(png, int(50 * scale), int(50 * scale)), green, 'A-1 keeps its colour')
-        self.assertEqual(pixel(png, int(130 * scale), int(50 * scale)), green, 'A-3 keeps its colour')
+        for x in (50, 130):
+            got = pixel(png, int(x * scale), int(50 * scale))
+            self.assertLess(distance(got, faded_green), 8, 'the other seats are faded on purpose: %r' % (got,))
 
     def test_highlighting_a_different_seat_moves_the_highlight(self):
         png = self.render(guid='a3', label='A-3')
         scale = 1600 / 300
         self.assertEqual(pixel(png, int(130 * scale), int(50 * scale)), hexrgb(HIGHLIGHT_FILL))
-        self.assertEqual(pixel(png, int(90 * scale), int(50 * scale)), hexrgb('#22c55e'))
+        self.assertGreater(pixel(png, int(90 * scale), int(50 * scale))[0], 150, 'A-2 is faded, no longer highlighted')
 
     def test_output_width_is_configurable(self):
         png = self.render(output_width=400)
@@ -215,6 +216,109 @@ class RenderTests(OrderFlowTestCase):
         rendered = spy.call_args.kwargs['bytestring'].decode()
         self.assertNotIn('passwd', rendered)
         self.assertNotIn('file://', rendered)
+
+
+def luminance(rgb):
+    r, g, b = rgb
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def distance(a, b):
+    return sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+
+
+class HighlightVisibilityTests(OrderFlowTestCase):
+    """The purchased seat must stand out whatever colours the plan uses.
+
+    Reported from production: every seat of the plan is red, and the highlight
+    was red too, so the customer's seat could not be told from the others.
+    The check is on real pixels: the chosen seat against EVERY other seat, in
+    colour and in grey scale (tickets are often printed in black and white)."""
+
+    SEAT_COUNT = 8
+    CHOSEN = 3
+
+    def plan(self, fill, extra=''):
+        seats = ''.join(
+            '<g id="seat-a%d" data-seat-label="A-%d"><circle cx="%d" cy="50" r="12" fill="%s" stroke="#333" stroke-width="1"/></g>'
+            % (i, i, 30 + 40 * i, fill, ) for i in range(self.SEAT_COUNT))
+        return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 100">%s%s</svg>' % (extra, seats)
+
+    def seat_pixels(self, svg, width=1600):
+        self.cfg.svg = svg
+        png = render_seat_plan_png(self.event, self.cfg, 'a%d' % self.CHOSEN, 'A-%d' % self.CHOSEN, output_width=width)
+        self.assertIsNotNone(png)
+        scale = width / 400
+        return [pixel(png, int((30 + 40 * i) * scale), int(50 * scale)) for i in range(self.SEAT_COUNT)], png
+
+    def assertStandsOut(self, fill):
+        pixels, _png = self.seat_pixels(self.plan(fill))
+        chosen = pixels[self.CHOSEN]
+        for i, other in enumerate(pixels):
+            if i == self.CHOSEN:
+                continue
+            self.assertGreaterEqual(distance(chosen, other), 120, 'seats coloured %s: chosen %r vs seat %d %r' % (fill, chosen, i, other))
+            self.assertGreaterEqual(abs(luminance(chosen) - luminance(other)), 40,
+                                    'seats coloured %s would not be told apart in black and white: %r vs %r' % (fill, chosen, other))
+
+    def test_when_every_seat_of_the_plan_is_red_the_chosen_one_still_stands_out(self):
+        for red in ('#ef4444', '#dc2626', '#ff0000', 'red', '#b91c1c'):
+            self.assertStandsOut(red)
+
+    def test_it_stands_out_for_the_other_common_seat_colours_too(self):
+        for colour in ('#22c55e', '#2563eb', '#f59e0b', '#a855f7', '#000000', '#6b7280', '#ffffff', '#facc15', '#f97316'):
+            self.assertStandsOut(colour)
+
+    def test_the_other_seats_are_faded_not_removed(self):
+        pixels, _png = self.seat_pixels(self.plan('#22c55e'))
+        others = [p for i, p in enumerate(pixels) if i != self.CHOSEN]
+        for p in others:
+            self.assertGreater(p[0], 140, 'faded towards white: %r' % (p,))
+            self.assertGreater(p[1] - p[0], 20, 'but still recognisably green: %r' % (p,))
+
+    def test_the_parts_of_the_plan_that_are_not_seats_keep_their_colour(self):
+        stage = '<rect id="stage" x="150" y="80" width="100" height="15" fill="#111111"/>'
+        self.cfg.svg = self.plan('#22c55e', extra=stage)
+        png = render_seat_plan_png(self.event, self.cfg, 'a3', 'A-3')
+        self.assertLess(sum(pixel(png, int(200 * 4), int(88 * 4))), 120, 'the stage is not faded')
+
+    def test_seats_identified_only_by_data_seat_id_are_faded_as_well(self):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50">'
+               '<g id="x1" data-seat-id="a1"><circle cx="20" cy="25" r="10" fill="#22c55e"/></g>'
+               '<g id="x2" data-seat-id="a2"><circle cx="60" cy="25" r="10" fill="#22c55e"/></g></svg>')
+        self.cfg.svg = svg
+        png = render_seat_plan_png(self.event, self.cfg, 'a1', 'A-1', output_width=1000)
+        self.assertGreater(pixel(png, 600, 250)[0], 140, 'the other seat is faded')
+
+    def test_a_reddish_seat_gets_the_alternative_highlight_colour(self):
+        from pretix_simpleseatingplan import ticket_image as ti
+        for fill in ('#ef4444', 'red', '#f00', 'rgb(220, 38, 38)', 'crimson', '#b91c1c'):
+            root = el('<svg %s><circle cx="1" cy="1" r="2" fill="%s"/></svg>' % (NS, fill))
+            seat = root[0]
+            ti._highlight_element(seat)
+            self.assertEqual(seat.get('fill'), ti.HIGHLIGHT_FILL_ALT, fill)
+
+    def test_a_seat_coloured_through_a_style_attribute_is_recognised_too(self):
+        from pretix_simpleseatingplan import ticket_image as ti
+        root = el('<svg %s><circle cx="1" cy="1" r="2" style="fill:#dc2626;stroke:#000"/></svg>' % NS)
+        seat = root[0]
+        ti._highlight_element(seat)
+        self.assertEqual(seat.get('fill'), ti.HIGHLIGHT_FILL_ALT)
+
+    def test_other_seat_colours_keep_the_standard_highlight(self):
+        from pretix_simpleseatingplan import ticket_image as ti
+        for fill in ('#22c55e', '#2563eb', '#f59e0b', 'none', 'url(#gradient)', '#000000', '#ffffff'):
+            root = el('<svg %s><circle cx="1" cy="1" r="2" fill="%s"/></svg>' % (NS, fill))
+            seat = root[0]
+            ti._highlight_element(seat)
+            self.assertEqual(seat.get('fill'), ti.HIGHLIGHT_FILL, fill)
+
+    def test_a_group_of_shapes_is_judged_by_its_first_coloured_shape(self):
+        from pretix_simpleseatingplan import ticket_image as ti
+        root = el('<svg %s><g id="g"><rect width="4" height="4" fill="#dc2626"/><circle r="1" fill="#22c55e"/></g></svg>' % NS)
+        group, rect = root[0], root[0][0]
+        ti._highlight_element(group)
+        self.assertEqual(rect.get('fill'), ti.HIGHLIGHT_FILL_ALT)
 
 
 class LayoutImageVariableTests(OrderFlowTestCase):
