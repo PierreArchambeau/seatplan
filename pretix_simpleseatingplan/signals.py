@@ -131,6 +131,11 @@ if HAS_LAYOUT_IMAGE_VARIABLES:
                 return None
             seat_guid, seat_label = resolve_seat_for_position(event, cfg, op)
             if not seat_guid:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "simpleseatingplan: no seat could be resolved for position %s (order %s) in event %s -- "
+                    "ticket image skipped", op.id, order.code, event.slug,
+                )
                 return None
             png_bytes = render_seat_plan_png(event, cfg, seat_guid, seat_label)
             if not png_bytes:

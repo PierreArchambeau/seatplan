@@ -169,7 +169,19 @@ def render_seat_plan_png(event, cfg, seat_guid, seat_label, output_width=1600):
         style_el.getparent().remove(style_el)
 
     el = _find_seat_element(root, cfg.seat_id_prefix or '', seat_guid)
-    if el is None or not _highlight_element(el):
+    if el is None:
+        logger.warning(
+            "simpleseatingplan: seat '%s' (id '%s%s' or data-seat-id) not found in plan SVG for event %s -- "
+            "ticket image will be skipped for this seat",
+            seat_guid, cfg.seat_id_prefix or '', seat_guid, event.slug,
+        )
+        return None
+    if not _highlight_element(el):
+        logger.warning(
+            "simpleseatingplan: seat element '%s' found in plan SVG for event %s but contains no recognizable "
+            "shape (circle/ellipse/rect/path/polygon/polyline/line) to highlight",
+            seat_guid, event.slug,
+        )
         return None
 
     if seat_label:
