@@ -827,9 +827,25 @@
           if (ok) {
             g.inputToGuid.set(input, guid);
             g.seatToInput.set(afterNorm, input);
+            // La saisie a été comprise mais reformulée par rapport au plan
+            // (ex: "a1" pour "A-1") -- le rassurer sur le siège retenu,
+            // sans pour autant l'empêcher de continuer.
+            const canonical = canonicalLabelForGuid(guid, cfg.prefix || '');
+            if (canonical && canonical !== after) {
+              setLegend(g.container, `Siège reconnu : ${canonical} (saisi « ${after} »).`);
+            }
           } else {
             input.setAttribute('data-seat-hold-failed', '1');
           }
+        } else if (!guid) {
+          // Rien sur le plan ne correspond à ce texte (faute de frappe
+          // probable) -- le signaler tout de suite plutôt que d'attendre le
+          // refus au moment de valider la commande, avec une suggestion si
+          // un siège proche existe (ex: rangée/numéro inversés).
+          const suggestion = suggestSeatLabel(after, cfg.prefix || '');
+          setLegend(g.container, suggestion
+            ? `Aucun siège ne correspond à « ${after} ». Vouliez-vous dire « ${suggestion} » ?`
+            : `Aucun siège ne correspond à « ${after} ». Veuillez sélectionner une place sur le plan.`);
         }
       }
       if (g.svg) refreshSelectedVisuals(g.svg, cfg);
@@ -990,7 +1006,11 @@
         }
 
         if (invalid.length || unavailable.length) {
-          invalid.forEach(i => showSeatError(i, 'Ce numéro de siège n\'existe pas. Veuillez sélectionner une place sur le plan.'));
+          invalid.forEach(i => {
+            const suggestion = suggestSeatLabel((i.value || '').trim(), prefix);
+            const suffix = suggestion ? ` Vouliez-vous dire « ${suggestion} » ?` : '';
+            showSeatError(i, 'Ce numéro de siège n\'existe pas. Veuillez sélectionner une place sur le plan.' + suffix);
+          });
           unavailable.forEach(i => showSeatError(i, 'Ce siège n\'est plus disponible. Veuillez en choisir un autre.'));
           (invalid[0] || unavailable[0]).scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
@@ -1018,6 +1038,73 @@
       }
     }
     return null;
+  }
+
+  /**
+   * Récupère le label "canonique" (data-seat-label) du plan pour un
+   * seat_guid donné, pour pouvoir signaler à l'utilisateur qu'une saisie
+   * manuelle tolérée ("a1", "A 1"...) a bien été reconnue comme ce siège.
+   */
+  function canonicalLabelForGuid(guid, prefix) {
+    if (!g.svg || !guid) return null;
+    const el = g.svg.querySelector(`[id='${prefix}${guid}']`) || g.svg.querySelector(`[data-seat-id='${guid}']`);
+    const lbl = el ? (el.getAttribute('data-seat-label') || '').trim() : '';
+    return lbl || null;
+  }
+
+  /**
+   * Distance d'édition tolérant les transpositions de caractères adjacents
+   * en une seule opération (ex: "1A" -> "A1"), en plus des insertions /
+   * suppressions / substitutions classiques (distance de Damerau-Levenshtein,
+   * variante "optimal string alignment"). Sert uniquement à proposer une
+   * correction plausible, pas à faire matcher un siège.
+   */
+  function editDistance(a, b) {
+    const m = a.length, n = b.length;
+    const d = [];
+    for (let i = 0; i <= m; i++) d[i] = [i];
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(
+          d[i - 1][j] + 1,        // suppression
+          d[i][j - 1] + 1,        // insertion
+          d[i - 1][j - 1] + cost  // substitution
+        );
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1); // transposition
+        }
+      }
+    }
+    return d[m][n];
+  }
+
+  /**
+   * Cherche, parmi les sièges du plan, celui dont le label normalisé est le
+   * plus proche du texte saisi -- pour proposer un "Vouliez-vous dire...?"
+   * en cas de faute de frappe plausible (rangée/numéro inversés, lettre
+   * voisine sur le clavier...). Retourne null si rien d'assez proche n'est
+   * trouvé, pour ne pas suggérer un siège sans rapport avec la saisie.
+   */
+  function suggestSeatLabel(typedLabel, prefix) {
+    if (!g.svg || !typedLabel) return null;
+    const norm = normalizeSeatLabel(typedLabel);
+    if (!norm) return null;
+    const sel = prefix ? `[id^='${prefix}']` : '[id]';
+    const seen = new Set();
+    let best = null, bestDist = Infinity;
+    for (const node of g.svg.querySelectorAll(sel)) {
+      const lbl = (node.getAttribute('data-seat-label') || '').trim();
+      if (!lbl) continue;
+      const candNorm = normalizeSeatLabel(lbl);
+      if (!candNorm || seen.has(candNorm)) continue;
+      seen.add(candNorm);
+      const dist = editDistance(norm, candNorm);
+      if (dist < bestDist) { bestDist = dist; best = lbl; }
+    }
+    const threshold = Math.max(1, Math.ceil(norm.length * 0.4));
+    return bestDist > 0 && bestDist <= threshold ? best : null;
   }
 
   function showSeatError(input, msg) {

@@ -52,6 +52,11 @@ function makeDom({ fetchImpl, cfgOverrides = {} } = {}) {
   const dom = new JSDOM(html, { url: 'https://example.test/checkout/questions/', runScripts: 'outside-only' });
   const { window } = dom;
 
+  // jsdom doesn't implement scrollIntoView (no real layout engine behind
+  // it); seatpicker.js calls it when pointing out an invalid/unavailable
+  // field on submit, so stub it out rather than letting that throw.
+  window.Element.prototype.scrollIntoView = () => {};
+
   window.fetch = fetchImpl;
   window.SimpleSeatingPlanCfg = Object.assign({
     svg: SVG_FIXTURE,
@@ -93,4 +98,68 @@ async function typeIntoField(window, input, value) {
   await new Promise((r) => setTimeout(r, 20));
 }
 
-module.exports = { makeDom, waitForBoot, typeIntoField, SVG_FIXTURE };
+/**
+ * A composable fake server for hold/release/status: `sold`/`held` are Sets
+ * of seat_guids representing the server's actual state (mutated as
+ * hold/release calls come in, just like the real SeatHold/SeatAssignment
+ * tables would). Tests can seed them to simulate "this seat is already
+ * sold" or "already held by someone else" before the page ever interacts
+ * with it, or just inspect `holdRequests`/`releaseRequests` to assert on
+ * exactly what the client sent.
+ */
+function makeServerMock({ sold = new Set(), held = new Set() } = {}) {
+  const holdRequests = [];
+  const releaseRequests = [];
+  const fetchImpl = async (url, opts) => {
+    const u = String(url);
+    if (u.includes('/hold/')) {
+      const body = new URLSearchParams(opts.body);
+      const guid = body.get('seat_guid');
+      holdRequests.push(Object.fromEntries(body.entries()));
+      if (sold.has(guid)) return { ok: false, status: 409, json: async () => ({ ok: false, error: 'sold' }) };
+      if (held.has(guid)) return { ok: false, status: 409, json: async () => ({ ok: false, error: 'held' }) };
+      held.add(guid);
+      return { ok: true, status: 200, json: async () => ({ ok: true, expires: new Date().toISOString() }) };
+    }
+    if (u.includes('/release/')) {
+      const body = new URLSearchParams(opts.body);
+      releaseRequests.push(Object.fromEntries(body.entries()));
+      held.delete(body.get('seat_guid'));
+      return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    }
+    if (u.includes('/status/')) {
+      return { ok: true, status: 200, json: async () => ({ sold: Array.from(sold), held: Array.from(held) }) };
+    }
+    throw new Error('Unexpected fetch in test mock: ' + u);
+  };
+  return { fetchImpl, holdRequests, releaseRequests, sold, held };
+}
+
+/**
+ * Dispatches a real 'submit' event on `form` (as clicking the checkout
+ * "Continue" button would) and reports whether the handler ultimately let
+ * the submission through. bindFormValidation always calls
+ * preventDefault()/stopImmediatePropagation() itself when it has async
+ * validation to do, then re-submits manually via form.submit() on success
+ * -- so we stub that method to observe it without jsdom attempting a real
+ * (unsupported) navigation.
+ */
+async function submitForm(window, form) {
+  let submitted = false;
+  form.submit = () => { submitted = true; };
+  form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 30));
+  return submitted;
+}
+
+/**
+ * Stops the periodic status-refresh interval scheduleRefresh() sets up when
+ * cfg.status_url is configured. Without this, that setInterval keeps firing
+ * (and keeps the process alive) forever after a test ends, since jsdom
+ * timers are real Node timers.
+ */
+function stopStatusRefresh(window) {
+  window.document.querySelector('[data-seatmap]')?._cancelRefresh?.();
+}
+
+module.exports = { makeDom, waitForBoot, typeIntoField, makeServerMock, submitForm, stopStatusRefresh, SVG_FIXTURE };
