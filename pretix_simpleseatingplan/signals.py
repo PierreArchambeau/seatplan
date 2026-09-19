@@ -1,4 +1,7 @@
 
+import hashlib
+
+from django.core.files.base import ContentFile
 from django.dispatch import receiver
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
@@ -11,6 +14,7 @@ from pretix.control.signals import nav_event_settings
 from pretix.presale.signals import html_head
 from .models import SeatingConfig, SeatHold, SeatAssignment, Seat
 from .seat_matching import build_label_index, match_seat_by_label, find_misplaced_seat_answer
+from .ticket_image import resolve_seat_for_position, render_seat_plan_png
 
 # Try to import order_position_meta_display if available
 try:
@@ -18,6 +22,13 @@ try:
     HAS_META_DISPLAY = True
 except ImportError:
     HAS_META_DISPLAY = False
+
+# Try to import layout_image_variables if available (ticket PDF image placeholders)
+try:
+    from pretix.base.signals import layout_image_variables
+    HAS_LAYOUT_IMAGE_VARIABLES = True
+except ImportError:
+    HAS_LAYOUT_IMAGE_VARIABLES = False
 
 @receiver(nav_event_settings, dispatch_uid='simpleseating_nav_event_settings')
 def nav_settings(sender, request, **kwargs):
@@ -97,6 +108,51 @@ if HAS_META_DISPLAY:
                 'name': _('Seat'),
                 'value': seat_label
             }
+
+# Add a ticket PDF image placeholder showing the seating plan with the
+# purchased seat highlighted, if available.
+if HAS_LAYOUT_IMAGE_VARIABLES:
+    @receiver(layout_image_variables, dispatch_uid='simpleseating_layout_image_variables')
+    def layout_image_variables_handler(sender, **kwargs):
+        event = sender
+
+        def _cfg_for(op):
+            try:
+                cfg = SeatingConfig.objects.get(event=event)
+            except SeatingConfig.DoesNotExist:
+                return None
+            if not cfg.svg or op.item_id != cfg.item_id:
+                return None
+            return cfg
+
+        def evaluate(op, order, ev):
+            cfg = _cfg_for(op)
+            if not cfg:
+                return None
+            seat_guid, seat_label = resolve_seat_for_position(event, cfg, op)
+            if not seat_guid:
+                return None
+            png_bytes = render_seat_plan_png(event, cfg, seat_guid, seat_label)
+            if not png_bytes:
+                return None
+            return ContentFile(png_bytes, name=f'seatplan-{seat_guid}.png')
+
+        def etag(op, order, ev):
+            cfg = _cfg_for(op)
+            if not cfg:
+                return None
+            seat_guid, _unused = resolve_seat_for_position(event, cfg, op)
+            if not seat_guid:
+                return None
+            return hashlib.sha1(f'{seat_guid}|{cfg.svg}'.encode('utf-8')).hexdigest()
+
+        return {
+            'simpleseating_plan': {
+                'label': _('Seating plan with purchased seat highlighted'),
+                'evaluate': evaluate,
+                'etag': etag,
+            }
+        }
 
 from django.utils import timezone
 
