@@ -725,8 +725,16 @@
 
     // 0) Vérifier que la question seat-label est présente sur cette page
     if (cfg.question_label_id && !isQuestionOnPage(cfg.question_label_id)) {
+      // N'afficher le message d'attente que sur les étapes de checkout
+      // *avant* l'étape "questions" (où le plan de salle est proposé) :
+      // "addons", "customer", "membership". Une fois l'étape "questions"
+      // passée (paiement, confirmation, page de commande après paiement),
+      // le message n'est plus pertinent.
+      var stepMatch = /\/checkout\/([^/]+)\//.exec(window.location.pathname);
+      var currentStep = stepMatch ? stepMatch[1] : null;
+      var isEarlyCheckoutStep = currentStep && ['addons', 'customer', 'membership', 'start'].indexOf(currentStep) !== -1;
       // Afficher un message d'information si on est sur une page de checkout (présence du formulaire)
-      var form = document.querySelector('form.checkout-form, form.form-horizontal, main form');
+      var form = isEarlyCheckoutStep && document.querySelector('form.checkout-form, form.form-horizontal, main form');
       if (form && !document.getElementById('seat-checkout-notice')) {
         var notice = document.createElement('div');
         notice.id = 'seat-checkout-notice';
