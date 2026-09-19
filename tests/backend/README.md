@@ -41,8 +41,13 @@ to the test results (look at the `Ran N tests ... OK` line).
 | `test_plan_import_security.py` | plan upload paths and every place the stored plan is rendered |
 | `test_audit_permissions.py` | who may open / use the seat audit |
 | `test_audit_command.py` | the audit logic (never overwrites a sale, ignores cancelled orders, idempotent fix) and the `simpleseating_audit` command, run with no django-scopes scope active like the real CLI |
+| `test_out_of_checkout.py` | seats sold outside the checkout: real `_perform_order` (refused and rolled back), real REST API (kept, conflict recorded), edits after the fact, order history texts |
+| `test_ticket_image.py` | the ticket plan image: real PNG pixels, shape highlighting, layout image variable |
+| `test_signals_misc.py` | navigation, presale `<head>`, category mapping, `order_placed`/`order_modified` branches, expiry |
 | `test_hardening.py` | read-only `status` polling, `hold_minutes` bounds |
 | `test_repo_hygiene.py` | secrets / the pretix data directory are not tracked by git |
+
+`SeatingTestCase` runs each test in a rolled-back transaction; `SeatingTransactionTestCase` (slower) uses real commits, needed when behaviour depends on whether a signal fires inside or after the order's transaction.
 
 `base.py` builds an event with the plugin enabled and a 3-seat plan, and provides helpers to act
 as independent shoppers (`new_shopper()`, each with its own cookie jar and pretix cart) and as a

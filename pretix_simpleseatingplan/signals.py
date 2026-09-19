@@ -2,12 +2,15 @@
 import hashlib
 
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.dispatch import receiver
 from django_scopes import scopes_disabled
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.urls import reverse
+from pretix.base.logentrytypes import OrderLogEntryType, log_entry_types
+from pretix.base.models import OrderPosition
 from pretix.base.services.cart import CartError
 from pretix.base.services.orders import OrderError
 from pretix.base.signals import validate_cart, validate_order, order_placed, order_canceled, order_expired, order_modified, periodic_task
@@ -34,7 +37,7 @@ except ImportError:
 
 @receiver(nav_event_settings, dispatch_uid='simpleseating_nav_event_settings')
 def nav_settings(sender, request, **kwargs):
-    if not request.user.has_event_permission(request.organizer, request.event, 'can_change_settings'):
+    if not request.user.has_event_permission(request.organizer, request.event, 'event.settings.general:write'):
         return []
     items = [{
         'label': _('Simple seating plan (SVG/JSON)'),
@@ -42,7 +45,7 @@ def nav_settings(sender, request, **kwargs):
         'active': request.path_info.endswith('/simpleseatingplan/'),
     }]
     # The audit lists orders, so it needs the right to view them as well.
-    if request.user.has_event_permission(request.organizer, request.event, 'can_view_orders', request=request):
+    if request.user.has_event_permission(request.organizer, request.event, 'event.orders:read', request=request):
         items.append({
             'label': _('Seat audit'),
             'url': reverse('plugins:pretix_simpleseatingplan:audit', kwargs={'organizer': request.organizer.slug, 'event': request.event.slug}),
@@ -331,6 +334,48 @@ def on_validate_order(sender, positions, **kwargs):
             except Exception as e:
                 logger.error(f"Error validating seat category for position {p.id}: {e}")
 
+CONFLICT_ACTION = 'pretix_simpleseatingplan.seat_conflict'
+EDIT_IGNORED_ACTION = 'pretix_simpleseatingplan.seat_edit_ignored'
+
+
+def _order_can_still_be_rolled_back():
+    """True while we are inside an open database transaction.
+
+    That is the case for the shop checkout: pretix creates the order and sends
+    order_placed inside one transaction, so raising from a receiver cancels the
+    whole order. The REST API and the order import commit the order *before*
+    sending order_placed; raising there would leave a committed order behind an
+    error response, so the callers below only record the problem in that case.
+    """
+    return transaction.get_connection().in_atomic_block
+
+
+def _order_code_of_position(position_id):
+    other = OrderPosition.all.filter(pk=position_id).select_related('order').first()
+    return other.order.code if other else None
+
+
+def _refuse_or_record_conflict(order, position, seat, typed, holder_position_id, logger):
+    """`position` asks for a seat that already belongs to another position.
+
+    validate_order only runs for shop checkouts. Orders created through the API
+    or the import, and edits made afterwards, never pass through it, so this is
+    where a double sale is actually caught.
+    """
+    other_code = _order_code_of_position(holder_position_id)
+    logger.error(
+        f"order_placed: seat '{seat.label}' is already assigned to position {holder_position_id} "
+        f"(order {other_code}); position {position.id} (order {order.code}) was not given it."
+    )
+    if _order_can_still_be_rolled_back():
+        raise OrderError(
+            _('The seat "%(seat)s" has just been sold to someone else. Please choose another seat.') % {'seat': seat.label}
+        )
+    order.log_action(CONFLICT_ACTION, data={
+        'position': position.positionid, 'seat': seat.label, 'typed': typed, 'other_order': other_code,
+    })
+
+
 @receiver(order_placed, dispatch_uid='simpleseating_order_placed')
 def on_order_placed(sender, order, **kwargs):
     import json as json_module
@@ -345,13 +390,12 @@ def on_order_placed(sender, order, **kwargs):
         return
     _purge_expired(event)
     label_index = build_label_index(event)
-    assigned_guids = set(SeatAssignment.objects.filter(event=event).values_list('seat_guid', flat=True))
 
     for op in order.positions.all():
         if op.item_id != cfg.item_id:
             continue
-        seat_guid = None
-        seat_label = None
+        seat = None
+        typed = None
 
         # Match by the "Seat" answer text. Note: there is deliberately no
         # "hold by cart_position_id" lookup here (there used to be one) --
@@ -365,32 +409,51 @@ def on_order_placed(sender, order, **kwargs):
         if cfg.question_label_id:
             ans = op.answers.filter(question_id=cfg.question_label_id).first()
             if ans and ans.answer:
+                typed = ans.answer
                 seat = match_seat_by_label(label_index, ans.answer)
-                if seat and seat.seat_guid not in assigned_guids:
-                    seat_guid = seat.seat_guid
-                    seat_label = seat.label
 
-        if not seat_guid:
+        if not seat:
             # validate_order should have caught this before payment; if we
             # still end up here, log loudly so it can be repaired instead
             # of silently leaving the seat looking free on the plan.
             logger.error(f"order_placed: no seat could be assigned for position {op.id} (order {order.code}) in event {event.slug}")
             continue
 
-        assigned_guids.add(seat_guid)
+        # The unique (event, seat) constraint makes this the authoritative,
+        # race-free check: whoever gets the row owns the seat.
+        assignment, created = SeatAssignment.objects.get_or_create(
+            event=event, seat_guid=seat.seat_guid, defaults={'order_position_id': op.id}
+        )
+        if not created and assignment.order_position_id != op.id:
+            _refuse_or_record_conflict(order, op, seat, typed, assignment.order_position_id, logger)
+            continue
+
         # Store seat info in position meta for custom display (as JSON string)
-        if seat_label:
-            try:
-                meta_dict = json_module.loads(op.meta_info) if isinstance(op.meta_info, str) else (op.meta_info or {})
-                if not isinstance(meta_dict, dict):
-                    meta_dict = {}
-            except (ValueError, TypeError):
+        try:
+            meta_dict = json_module.loads(op.meta_info) if isinstance(op.meta_info, str) else (op.meta_info or {})
+            if not isinstance(meta_dict, dict):
                 meta_dict = {}
-            meta_dict['seat_number'] = seat_label
-            op.meta_info = json_module.dumps(meta_dict)
-            op.save(update_fields=['meta_info'])
-        SeatAssignment.objects.get_or_create(event=event, seat_guid=seat_guid, defaults={'order_position_id': op.id})
+        except (ValueError, TypeError):
+            meta_dict = {}
+        meta_dict['seat_number'] = seat.label
+        op.meta_info = json_module.dumps(meta_dict)
+        op.save(update_fields=['meta_info'])
     SeatHold.objects.filter(event=event, seat_guid__in=SeatAssignment.objects.filter(event=event).values_list('seat_guid', flat=True)).delete()
+
+
+def _record_ignored_edit(order, position, typed, reason, kept_label, other_code=None):
+    """An edit to the seat answer of an existing order could not be applied.
+    Leave a trace in the order's history (once per distinct edit) so staff
+    notice it without reading server logs."""
+    for entry in order.all_logentries().filter(action_type=EDIT_IGNORED_ACTION):
+        data = entry.parsed_data
+        if data.get('position') == position.positionid and data.get('typed') == typed and data.get('reason') == reason:
+            return
+    order.log_action(EDIT_IGNORED_ACTION, data={
+        'position': position.positionid, 'typed': typed, 'reason': reason,
+        'kept_seat': kept_label, 'other_order': other_code,
+    })
+
 
 @receiver(order_modified, dispatch_uid='simpleseating_order_modified')
 def on_order_modified(sender, order, **kwargs):
@@ -406,8 +469,8 @@ def on_order_modified(sender, order, **kwargs):
     This can only react after the fact -- the edit is already saved by the
     time this fires -- so ambiguous cases (edited to a seat already held by
     another position, or to a label matching no seat at all) are left
-    untouched and logged rather than guessed at; run simpleseating_audit to
-    review those.
+    untouched. They are logged and also recorded in the order's history so
+    they are visible in the control panel; run simpleseating_audit to review.
     """
     import logging
     event = sender
@@ -438,12 +501,18 @@ def on_order_modified(sender, order, **kwargs):
         if new_guid == current_guid:
             continue  # this position's seat answer didn't actually change
 
+        kept_label = None
+        if current_guid:
+            kept = Seat.objects.filter(event=event, seat_guid=current_guid).first()
+            kept_label = kept.label if kept else None
+
         if new_guid is None:
             logger.warning(
                 f"order_modified: position {op.id} (order {order.code}) seat answer "
                 f"'{raw_label}' no longer matches a known seat; keeping previous "
                 f"assignment {current_guid!r} in place. Run simpleseating_audit to review."
             )
+            _record_ignored_edit(order, op, raw_label, 'unknown_seat' if raw_label else 'answer_removed', kept_label)
             continue
 
         holder = assigned_guids.get(new_guid)
@@ -452,6 +521,10 @@ def on_order_modified(sender, order, **kwargs):
                 f"order_modified: position {op.id} (order {order.code}) was edited to seat "
                 f"'{raw_label}' ({new_guid}), but that seat is already assigned to position "
                 f"{holder.order_position_id}. Leaving both assignments untouched; needs manual review."
+            )
+            _record_ignored_edit(
+                order, op, raw_label, 'seat_taken', kept_label,
+                other_code=_order_code_of_position(holder.order_position_id),
             )
             continue
 
@@ -475,6 +548,42 @@ def on_order_modified(sender, order, **kwargs):
         meta_dict['seat_number'] = new_seat.label
         op.meta_info = json_module.dumps(meta_dict)
         op.save(update_fields=['meta_info'])
+
+
+class SeatConflictLogEntryType(OrderLogEntryType):
+    """History entry of an order whose seat was already sold to another order."""
+
+    def display(self, logentry, data):
+        return _(
+            'Seat conflict: ticket #%(position)s asks for seat %(seat)s, which was already sold to order %(other)s. '
+            'The earlier sale was kept and this ticket has no seat assigned. Please review it in the seat audit.'
+        ) % {'position': data.get('position'), 'seat': data.get('seat'), 'other': data.get('other_order') or '?'}
+
+
+class SeatEditIgnoredLogEntryType(OrderLogEntryType):
+    """History entry of an order whose seat answer was edited to something that could not be applied."""
+
+    def display(self, logentry, data):
+        reasons = {
+            'seat_taken': _('that seat is already sold to order %(other)s'),
+            'unknown_seat': _('no seat has that name'),
+            'answer_removed': _('the seat was left empty'),
+        }
+        reason = reasons.get(data.get('reason'), '') % {'other': data.get('other_order') or '?'}
+        return _(
+            'Seat change ignored: ticket #%(position)s was edited to "%(typed)s" but %(reason)s. '
+            'The ticket keeps seat %(kept)s. Please review it in the seat audit.'
+        ) % {
+            'position': data.get('position'), 'typed': data.get('typed'), 'reason': reason,
+            'kept': data.get('kept_seat') or '-',
+        }
+
+
+log_entry_types.register(
+    SeatConflictLogEntryType(action_type=CONFLICT_ACTION),
+    SeatEditIgnoredLogEntryType(action_type=EDIT_IGNORED_ACTION),
+)
+
 
 @receiver(order_canceled, dispatch_uid='simpleseating_order_canceled')
 def on_order_canceled(sender, order, **kwargs):

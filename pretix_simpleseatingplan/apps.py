@@ -11,7 +11,7 @@ class PluginApp(PluginConfig):
         description = _("Reserved seating with readable labels, category→variation mapping, holds & assignments, CSP-safe config.")
         visible = True
         version = "0.8.0"
-        compatibility = "pretix>=2025.6"
+        compatibility = "pretix>=2026.3"
         category = "FEATURE"
 
     def ready(self):

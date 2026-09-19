@@ -192,7 +192,11 @@ Each item below is covered by regression tests in `tests/backend/`.
 #### 2. **Double-booking** (`test_order_flow.py`)
 - **Vulnerability**: holds were advisory; `validate_order` only refused seats already *sold*, and it runs before pretix takes its order lock.
 - **Prevention**: `holds.claim_seat()` creates the hold atomically (unique constraint on `(event, seat_guid)`). `validate_order` claims the seat for the position, so a seat held by another cart is refused and two simultaneous buyers cannot both succeed.
-- **Residual risk**: orders created outside the checkout (REST API, imports, staff edits in the control panel) bypass `validate_order`. The seat audit page reports the resulting conflicts.
+- **Orders created or edited outside the checkout** (REST API, order import, staff or customer edits) never pass through `validate_order`, and pretix offers no hook before they are saved. The plugin therefore relies on `order_placed` / `order_modified`, whose behaviour depends on the context (`test_out_of_checkout.py`):
+  - *Shop checkout*: `order_placed` runs inside the transaction that creates the order. If the seat already belongs to another position, it raises an `OrderError`, the whole order is rolled back and the shopper is asked to pick another seat.
+  - *REST API and import*: `order_placed` runs **after** the order was committed, so refusing is impossible (raising would leave a committed order behind an error response). The order is kept, the earlier sale is never overwritten, and an entry "Seat conflict" is added to the order's history. The seat audit lists it too.
+  - *Edits after the fact*: a seat answer edited to a seat sold to someone else, to a name matching no seat, or emptied is ignored (the ticket keeps its seat) and an entry "Seat change ignored" is added to the order's history.
+  - The context is detected with `transaction.get_connection().in_atomic_block`.
 
 #### 3. **Session requirement** (`test_hardening.py`)
 - `/status`, `/hold`, `/release` and `/config.js` require a session. This is only a coarse filter (any visitor has a session); the ownership check in item 1 is the real protection.
@@ -279,7 +283,7 @@ Each item below is covered by regression tests in `tests/backend/`.
 ### Dependencies
 
 - Django (via Pretix)
-- Pretix >= 2026.1.x
+- Pretix >= 2026.3 (uses the granular `event.*` permission names, which do not exist in earlier releases)
 - lxml, cairosvg (ticket image rendering; declared in `setup.cfg`)
 
 ### Running the tests

@@ -3,7 +3,7 @@
 A Pretix plugin for managing numbered and interactive seating plans.
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Pretix Compatible: 2026.1.x](https://img.shields.io/badge/Pretix-2026.1.x-green.svg)](https://pretix.eu)
+[![Pretix Compatible: 2026.3+](https://img.shields.io/badge/Pretix-2026.3%2B-green.svg)](https://pretix.eu)
 
 ## 📌 About
 

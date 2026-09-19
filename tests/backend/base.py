@@ -11,7 +11,7 @@ import time
 from contextlib import contextmanager
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import Client, TestCase
+from django.test import Client, TestCase, TransactionTestCase
 from django.utils import timezone
 from django_scopes import scopes_disabled
 from django_scopes.state import state as scope_state
@@ -44,7 +44,7 @@ SVG = (
 )
 
 
-class SeatingTestCase(TestCase):
+class SeatingFixtures:
     """An event with the plugin enabled, one ticket item, a configured plan
     with three seats (a1..a3), and helpers to act as independent shoppers."""
 
@@ -155,3 +155,13 @@ class SeatingTestCase(TestCase):
         if json_text is not None:
             data['json_file'] = SimpleUploadedFile('plan.json', json_text.encode('utf-8'), content_type='application/json')
         return client.post(self.control_url(), data)
+
+
+class SeatingTestCase(SeatingFixtures, TestCase):
+    """The usual case: every test runs inside a transaction that is rolled back."""
+
+
+class SeatingTransactionTestCase(SeatingFixtures, TransactionTestCase):
+    """For code whose behaviour depends on real commits (for example whether a
+    signal fires inside or after the transaction that created an order).
+    Slower: the database is flushed after each test."""

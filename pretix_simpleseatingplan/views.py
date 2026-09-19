@@ -174,7 +174,7 @@ def _import_plan(event, cfg, json_file, svg_file):
     cfg.save()
     return count
 
-@event_permission_required('can_change_settings')
+@event_permission_required('event.settings.general:write')
 def settings(request, organizer, event):
     ev = _get_event(organizer, event)
     cfg, _ = SeatingConfig.objects.get_or_create(event=ev)
@@ -205,14 +205,14 @@ def settings(request, organizer, event):
         'svg_preview': clean_plan_svg(SeatingConfig.objects.filter(event=ev).values_list('svg', flat=True).first()),
     })
 
-@event_permission_required('can_change_settings')
-@event_permission_required('can_view_orders')
+@event_permission_required('event.settings.general:write')
+@event_permission_required('event.orders:read')
 def audit(request, organizer, event):
     # The audit exposes order codes and customer answers, so managing the
     # event settings alone is not enough; repairing assignments additionally
     # needs the right to change orders.
     if request.method == 'POST' and request.POST.get('action') == 'fix':
-        if not request.user.has_event_permission(request.organizer, request.event, 'can_change_orders', request=request):
+        if not request.user.has_event_permission(request.organizer, request.event, 'event.orders:write', request=request):
             raise PermissionDenied('You do not have permission to change orders.')
     ev = _get_event(organizer, event)
     try:
