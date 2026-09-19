@@ -13,7 +13,14 @@ this plugin (`pip install -e .`) are installed:
 python -m django test tests.backend --settings=pretix.testutils.settings
 ```
 
-Run a single module or test:
+With pytest (needs `pip install pytest pytest-django`; configured in `pytest.ini`, and used by
+VS Code's Testing panel):
+
+```
+python -m pytest
+```
+
+Run a single module or test with the Django runner:
 
 ```
 python -m django test tests.backend.test_holds_security --settings=pretix.testutils.settings
@@ -33,6 +40,7 @@ to the test results (look at the `Ran N tests ... OK` line).
 | `test_svg_sanitize.py` | the SVG allow-list sanitizer (hostile input neutralised, real plan markup preserved) |
 | `test_plan_import_security.py` | plan upload paths and every place the stored plan is rendered |
 | `test_audit_permissions.py` | who may open / use the seat audit |
+| `test_audit_command.py` | the audit logic (never overwrites a sale, ignores cancelled orders, idempotent fix) and the `simpleseating_audit` command, run with no django-scopes scope active like the real CLI |
 | `test_hardening.py` | read-only `status` polling, `hold_minutes` bounds |
 | `test_repo_hygiene.py` | secrets / the pretix data directory are not tracked by git |
 

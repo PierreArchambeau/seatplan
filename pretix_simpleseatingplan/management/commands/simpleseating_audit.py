@@ -21,6 +21,7 @@ See also the "Seat audit" page in the event's control panel (Simple seating
 plan settings), which runs the same logic interactively.
 """
 from django.core.management.base import BaseCommand
+from django_scopes import scopes_disabled
 
 from pretix.base.models import Event
 
@@ -41,6 +42,10 @@ class Command(BaseCommand):
         parser.add_argument('--event', help='Only audit this event, given as organizer/slug', default=None)
         parser.add_argument('--fix', action='store_true', help='Create missing SeatAssignments where exactly one order position unambiguously matches a free seat')
 
+    # pretix models are organizer-scoped and a management command has no request to
+    # activate a scope, so like pretix's own commands this one must switch scoping
+    # off itself (it audits events across organizers), or it dies with ScopeError.
+    @scopes_disabled()
     def handle(self, *args, **options):
         events = Event.objects.filter(simpleseating_cfg__isnull=False)
         if options['event']:

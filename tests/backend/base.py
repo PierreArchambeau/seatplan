@@ -8,15 +8,32 @@ production ones -- see tests/backend/README.md for how to run them.
 """
 import datetime
 import time
+from contextlib import contextmanager
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase
 from django.utils import timezone
 from django_scopes import scopes_disabled
+from django_scopes.state import state as scope_state
 from pretix.base.models import CartPosition, Event, Item, Organizer, Question, Quota, Team, User
 
 from pretix_simpleseatingplan.forms import Q_SEAT_LABEL
 from pretix_simpleseatingplan.models import Seat, SeatingConfig
+
+@contextmanager
+def no_active_scope():
+    """Run a block the way `python -m pretix <command>` or the periodic task
+    runner does: with NO django-scopes scope active, so scoped managers such
+    as Event.objects raise ScopeError unless the code opts out itself.
+
+    The test classes disable scoping for the whole class for convenience,
+    which would otherwise hide this whole category of production crash."""
+    token = scope_state.set(None)
+    try:
+        yield
+    finally:
+        scope_state.reset(token)
+
 
 SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">'

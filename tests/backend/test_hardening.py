@@ -74,3 +74,22 @@ class HoldMinutesBoundsTests(SeatingTestCase):
             resp = self.post_minutes(value)
             self.assertEqual(resp.status_code, 200, value)  # form redisplayed with an error
             self.assertEqual(SeatingConfig.objects.get(event=self.event).hold_minutes, 10, 'unchanged after %r' % value)
+
+
+class PeriodicTaskTests(SeatingTestCase):
+    """`runperiodic` calls the receivers with no django-scopes scope active."""
+
+    def test_purges_expired_holds_across_events_and_keeps_live_ones(self):
+        from pretix_simpleseatingplan.signals import on_periodic
+        from .base import no_active_scope
+        SeatHold.objects.create(
+            event=self.event, seat_guid='a1', cart_position_id=1,
+            expires=timezone.now() - datetime.timedelta(minutes=1),
+        )
+        SeatHold.objects.create(
+            event=self.event, seat_guid='a2', cart_position_id=2,
+            expires=timezone.now() + datetime.timedelta(minutes=5),
+        )
+        with no_active_scope():
+            on_periodic(sender=None)
+        self.assertEqual(list(SeatHold.objects.filter(event=self.event).values_list('seat_guid', flat=True)), ['a2'])

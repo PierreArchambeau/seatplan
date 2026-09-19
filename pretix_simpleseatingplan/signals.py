@@ -3,6 +3,7 @@ import hashlib
 
 from django.core.files.base import ContentFile
 from django.dispatch import receiver
+from django_scopes import scopes_disabled
 from django.templatetags.static import static
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -486,6 +487,7 @@ def on_order_expired(sender, order, **kwargs):
     SeatAssignment.objects.filter(event=event, order_position_id__in=order.positions.values_list('id', flat=True)).delete()
 
 @receiver(periodic_task, dispatch_uid='simpleseating_periodic')
+@scopes_disabled()  # runperiodic activates no scope, and this iterates over all events
 def on_periodic(sender, **kwargs):
     from pretix.base.models import Event
     for ev in Event.objects.all().iterator():
